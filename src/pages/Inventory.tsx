@@ -59,11 +59,22 @@ export default function Inventory() {
 
   const loadData = async () => {
     setLoading(true);
-    const [productsRes, godownsRes] = await Promise.all([
+    const [productsRes, godownsRes, godownStockRes] = await Promise.all([
       supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
+      supabase.from('godown_stock').select('product_id, quantity'),
     ]);
-    setProducts(productsRes.data || []);
+    const rawProducts = productsRes.data || [];
+    const stockRows = godownStockRes.data || [];
+    const stockTotals: Record<string, number> = {};
+    for (const row of stockRows) {
+      stockTotals[row.product_id] = (stockTotals[row.product_id] || 0) + (row.quantity || 0);
+    }
+    const merged = rawProducts.map(p => ({
+      ...p,
+      stock_quantity: stockTotals[p.id] ?? p.stock_quantity,
+    }));
+    setProducts(merged);
     setGodowns(godownsRes.data || []);
     setLoading(false);
   };
