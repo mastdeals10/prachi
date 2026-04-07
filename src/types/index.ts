@@ -190,7 +190,7 @@ export interface SalesOrder {
   created_at: string;
 }
 
-export interface SalesOrderItem {
+export interface SalesOrderItem {  // godown_id added per DB migration
   id: string;
   sales_order_id: string;
   product_id?: string;

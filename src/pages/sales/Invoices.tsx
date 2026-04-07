@@ -366,8 +366,15 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       return next;
     });
 
-    if (field === 'product_id' && value && form.godown_id) {
-      loadGodownStock(form.godown_id, [...items.map(it => it.product_id), value]);
+    // Auto-select best godown per item
+    if (field === 'product_id' && value) {
+      const { data: stockRows } = await supabase
+        .from('godown_stock').select('godown_id, quantity')
+        .eq('product_id', value).gt('quantity', 0)
+        .order('quantity', { ascending: false }).limit(1);
+      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: bestGodown}; return next; });
+      if (bestGodown) loadGodownStock(bestGodown, [value]);
     }
 
     if (field === 'product_id' && value && form.customer_id) {
@@ -390,7 +397,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     }
   };
 
-  const addEditItem = () => setEditItems(prev => [...prev, { product_id: '', product_name: '', description: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', tax_pct: '0', total_price: 0 }]);
+  const addEditItem = () => setEditItems(prev => [...prev, { product_id: '', product_name: '', description: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', tax_pct: '0', total_price: 0 }]); // godown handled per item
   const removeEditItem = (i: number) => setEditItems(prev => prev.filter((_, idx) => idx !== i));
 
   const updateEditItem = (i: number, field: string, value: string) => {
@@ -759,7 +766,10 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
 
   const filtered = invoices.filter(i => {
     const matchSearch = i.customer_name.toLowerCase().includes(search.toLowerCase()) || i.invoice_number.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'All' || i.status === statusFilter.toLowerCase();
+    // "All" tab hides cancelled; "Cancelled" tab shows only cancelled
+    const matchStatus = statusFilter === 'All'
+      ? i.status !== 'cancelled'
+      : i.status === statusFilter.toLowerCase();
     const matchDate = i.invoice_date >= dateRange.from && i.invoice_date <= dateRange.to;
     return matchSearch && matchStatus && matchDate;
   });
@@ -1260,11 +1270,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                   </select>
                 </div>
                 <div>
-                  <label className="label flex items-center gap-1"><Warehouse className="w-3 h-3 text-neutral-400" /> Dispatch From</label>
-                  <select value={form.godown_id} onChange={e => { setForm(f => ({ ...f, godown_id: e.target.value })); if (e.target.value) loadGodownStock(e.target.value, items.map(i => i.product_id)); }} className="input text-xs">
-                    <option value="">-- Godown --</option>
-                    {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
+                  <p className="text-[10px] text-neutral-400 pt-1">Godown selected per line item below</p>
                 </div>
               </div>
             </div>
@@ -1293,8 +1299,8 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                 <thead className="bg-neutral-50">
                   <tr>
                     <th className="table-header text-left">Product</th>
+                    <th className="table-header text-left w-24">Godown</th>
                     <th className="table-header text-left">Description</th>
-                    {form.godown_id && <th className="table-header text-right" style={{width:'52px'}}>Stock</th>}
                     <th className="table-header text-right" style={{width:'60px'}}>Qty</th>
                     <th className="table-header text-right" style={{width:'80px'}}>Rate</th>
                     <th className="table-header text-right" style={{width:'56px'}}>Disc%</th>
@@ -1317,16 +1323,17 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                           </select>
                           {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs py-1 mt-0.5" placeholder="Type item name..." />}
                         </td>
+                        <td className="px-1 py-1.5 w-24">
+                          <select value={item.godown_id} onChange={e => { const gid=e.target.value; setItems(prev=>{const next=[...prev];next[i]={...next[i],godown_id:gid};return next;}); if (gid && item.product_id) loadGodownStock(gid,[item.product_id]); }} className="input text-xs py-1">
+                            {godowns.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
+                          </select>
+                          {item.product_id && availStock !== null && (
+                            <p className={`text-[9px] mt-0.5 font-medium ${availStock===0?'text-error-600':stockWarning?'text-warning-600':'text-success-600'}`}>{availStock} left</p>
+                          )}
+                        </td>
                         <td className="px-2 py-1.5">
                           <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} className="input text-xs py-1 w-full" placeholder="Description (optional)" />
                         </td>
-                        {form.godown_id && (
-                          <td className="px-1 py-1.5 text-right">
-                            {availStock !== null ? (
-                              <span className={`text-xs font-semibold ${availStock === 0 ? 'text-error-600' : stockWarning ? 'text-warning-600' : 'text-success-600'}`}>{availStock}</span>
-                            ) : <span className="text-neutral-300 text-xs">—</span>}
-                          </td>
-                        )}
                         <td className="px-1 py-1.5"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className={`input text-xs text-right py-1 w-full ${stockWarning ? 'border-warning-400' : ''}`} /></td>
                         <td className="px-1 py-1.5"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
                         <td className="px-1 py-1.5"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>

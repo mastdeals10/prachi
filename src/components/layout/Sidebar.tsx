@@ -23,7 +23,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
       const { count } = await supabase
         .from('invoices')
         .select('id', { count: 'exact', head: true })
-        .in('status', ['sent', 'partial', 'overdue']);
+        .not('status', 'eq', 'cancelled');
       setUnpaidInvoices(count || 0);
     };
     loadBadges();

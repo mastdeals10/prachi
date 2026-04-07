@@ -45,7 +45,8 @@ export default function GodownStockPage() {
       supabase.from('godown_stock')
         .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price)')
         .gt('quantity', 0)
-        .order('quantity', { ascending: false }),
+        .order('quantity', { ascending: false })
+        .limit(500),
     ]);
     setGodowns(godownsRes.data || []);
     setAllStock((stockRes.data || []) as GodownStock[]);

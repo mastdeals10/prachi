@@ -21,6 +21,7 @@ interface LineItem {
   unit_price: string;
   discount_pct: string;
   total_price: number;
+  godown_id: string;
 }
 
 interface SalesOrdersProps {
@@ -53,7 +54,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     courier_charges: '0', discount_amount: '0', notes: '',
     godown_id: '',
   });
-  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0 }]);
+  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
 
@@ -99,7 +100,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     setExpandedRows(next);
   };
 
-  const addItem = () => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0 }]);
+  const addItem = () => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]);
   const removeItem = (i: number) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
   const updateItem = async (i: number, field: string, value: string) => {
@@ -117,8 +118,22 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return next;
     });
 
-    if (field === 'product_id' && value && form.godown_id) {
-      loadGodownStock(form.godown_id, [...items.map(it => it.product_id), value]);
+    // Auto-select best godown when product chosen (pick godown with most stock)
+    if (field === 'product_id' && value) {
+      const { data: stockRows } = await supabase
+        .from('godown_stock')
+        .select('godown_id, quantity')
+        .eq('product_id', value)
+        .gt('quantity', 0)
+        .order('quantity', { ascending: false })
+        .limit(1);
+      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      setItems(prev => {
+        const next = [...prev];
+        next[i] = { ...next[i], godown_id: bestGodown };
+        return next;
+      });
+      if (bestGodown) loadGodownStock(bestGodown, [value]);
     }
 
     if (field === 'product_id' && value && form.customer_id) {
@@ -141,7 +156,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const getStockForItem = (item: LineItem): number | null => {
     if (!item.product_id) return null;
-    if (form.godown_id && godownStockMap[item.product_id] !== undefined) {
+    if (godownStockMap[item.product_id] !== undefined) {
       return godownStockMap[item.product_id];
     }
     const p = products.find(p => p.id === item.product_id);
@@ -201,6 +216,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           unit_price: parseFloat(i.unit_price) || 0,
           discount_pct: parseFloat(i.discount_pct) || 0,
           total_price: i.total_price,
+          godown_id: i.godown_id || null,
         }))
       );
     }
@@ -273,8 +289,9 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             unit_price: String(i.unit_price),
             discount_pct: String(i.discount_pct || 0),
             total_price: i.total_price,
+            godown_id: (i as Record<string,string>).godown_id || '',
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0 }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
     setShowModal(true);
   };
@@ -622,18 +639,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                   <input type="date" value={form.delivery_date} onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))} className="input text-xs" />
                 </div>
                 <div className="col-span-2">
-                  <label className="label flex items-center gap-1"><Warehouse className="w-3 h-3 text-neutral-400" /> Dispatch Godown</label>
-                  <select
-                    value={form.godown_id}
-                    onChange={e => {
-                      setForm(f => ({ ...f, godown_id: e.target.value }));
-                      if (e.target.value) loadGodownStock(e.target.value, items.map(i => i.product_id));
-                    }}
-                    className="input text-xs"
-                  >
-                    <option value="">-- Select Godown --</option>
-                    {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.location ? ` (${g.location})` : ''}</option>)}
-                  </select>
+                  <p className="text-[10px] text-neutral-400">Godown is selected per product below</p>
                 </div>
               </div>
             </div>
@@ -669,6 +675,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 <thead className="bg-neutral-50">
                   <tr>
                     <th className="table-header text-left">Product</th>
+                    <th className="table-header text-left w-32">Godown</th>
                     <th className="table-header text-right w-16">Qty</th>
                     <th className="table-header text-right w-24">Price</th>
                     <th className="table-header text-right w-16">Disc%</th>
@@ -695,13 +702,26 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           </select>
                           {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
                         </td>
+                        <td className="px-3 py-2 w-32">
+                          <select value={item.godown_id} onChange={e => {
+                            const gid = e.target.value;
+                            setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: gid}; return next; });
+                            if (gid && item.product_id) loadGodownStock(gid, [item.product_id]);
+                          }} className="input text-xs py-1">
+                            {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                          </select>
+                          {item.product_id && (() => {
+                            const s = godownStockMap[item.product_id];
+                            return s !== undefined ? (
+                              <p className={`text-[10px] mt-0.5 text-right font-medium ${s === 0 ? 'text-error-600' : s <= (products.find(p=>p.id===item.product_id)?.low_stock_alert||5) ? 'text-warning-600' : 'text-success-600'}`}>
+                                {s} in stock
+                              </p>
+                            ) : null;
+                          })()}
+                        </td>
                         <td className="px-3 py-2 w-20">
                           <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
-                          {overStock && (
-                            <p className="text-[10px] text-amber-600 mt-0.5 text-right">
-                              ({form.godown_id ? 'Only' : 'Only'} {stock} {form.godown_id ? 'in godown' : 'in stock'})
-                            </p>
-                          )}
+
                         </td>
                         <td className="px-3 py-2 w-24"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
                         <td className="px-3 py-2 w-16"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>

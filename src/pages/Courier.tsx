@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Truck, CheckCircle, Package, IndianRupee, ArrowUpRight, Printer } from 'lucide-react';
+import { Plus, Search, Truck, CheckCircle, Package, IndianRupee, ArrowUpRight, Printer, Pencil, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, generateId } from '../lib/utils';
 import { useCompanySettings } from '../lib/useCompanySettings';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
-import ActionMenu, { actionEdit } from '../components/ui/ActionMenu';
 import type { CourierEntry, Customer, DeliveryChallan } from '../types';
 import type { PageState } from '../App';
 
@@ -100,8 +99,13 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     setShowModal(true);
   };
 
-  const openEdit = (e: CourierEntry) => {
+  const openEdit = async (e: CourierEntry) => {
     setEditing(e);
+    let addr = { address: '', address2: '', city: '', state: '', pincode: '', phone: '' };
+    if (e.customer_id) {
+      const { data: c } = await supabase.from('customers').select('address, address2, city, state, pincode, phone').eq('id', e.customer_id).maybeSingle();
+      if (c) addr = { address: c.address || '', address2: (c as Record<string,string>).address2 || '', city: c.city || '', state: c.state || '', pincode: c.pincode || '', phone: c.phone || '' };
+    }
     setForm({
       courier_date: e.courier_date,
       customer_id: e.customer_id || '',
@@ -113,8 +117,12 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       status: e.status,
       notes: e.notes || '',
       sales_order_id: e.sales_order_id || '',
-      customer_address: '', customer_address2: '',
-      customer_city: '', customer_state: '', customer_pincode: '', customer_phone: '',
+      customer_address: addr.address,
+      customer_address2: addr.address2,
+      customer_city: addr.city,
+      customer_state: addr.state,
+      customer_pincode: addr.pincode,
+      customer_phone: addr.phone,
     });
     setShowModal(true);
   };
@@ -169,6 +177,12 @@ export default function Courier({ prefillFromDC }: CourierProps) {
 
   const updateStatus = async (id: string, status: string) => {
     await supabase.from('courier_entries').update({ status }).eq('id', id);
+    loadData();
+  };
+
+  const deleteEntry = async (id: string) => {
+    if (!window.confirm('Delete this shipment entry?')) return;
+    await supabase.from('courier_entries').delete().eq('id', id);
     loadData();
   };
 
@@ -354,8 +368,10 @@ export default function Courier({ prefillFromDC }: CourierProps) {
                         : <span className="text-neutral-300">—</span>}
                     </td>
                     <td className="table-cell">
-                      {e.sales_order_id
-                        ? <span className="badge bg-blue-50 text-blue-700 gap-1"><ArrowUpRight className="w-2.5 h-2.5" />SO</span>
+                      {e.delivery_challan_id
+                        ? <span className="badge bg-blue-50 text-blue-700 gap-1"><ArrowUpRight className="w-2.5 h-2.5" />DC</span>
+                        : e.sales_order_id
+                        ? <span className="badge bg-orange-50 text-orange-700 gap-1"><ArrowUpRight className="w-2.5 h-2.5" />SO</span>
                         : e.invoice_id
                         ? <span className="badge bg-green-50 text-green-700 gap-1"><ArrowUpRight className="w-2.5 h-2.5" />Inv</span>
                         : <span className="text-neutral-300">—</span>}
@@ -368,12 +384,11 @@ export default function Courier({ prefillFromDC }: CourierProps) {
                       </span>
                     </td>
                     <td className="table-cell text-right">
-                      <ActionMenu items={[
-                        actionEdit(() => openEdit(e)),
-                        { label: 'Print Label', icon: <Printer className="w-3.5 h-3.5" />, onClick: () => openLabel(e) },
-                        ...(e.status === 'booked' ? [{ label: 'Mark In Transit', icon: <Truck className="w-3.5 h-3.5" />, onClick: () => updateStatus(e.id, 'in_transit') }] : []),
-                        ...(e.status === 'in_transit' ? [{ label: 'Mark Delivered', icon: <CheckCircle className="w-3.5 h-3.5" />, onClick: () => updateStatus(e.id, 'delivered') }] : []),
-                      ]} />
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openLabel(e)} title="Print Label" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openEdit(e)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => deleteEntry(e.id)} title="Delete" className="p-1.5 rounded-lg text-neutral-400 hover:text-error-600 hover:bg-error-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2 } from 'lucide-react';
+import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,6 +29,7 @@ export default function Inventory() {
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [openingStocks, setOpeningStocks] = useState<Record<string, string>>({});
 
+  const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [showLedgerModal, setShowLedgerModal] = useState(false);
   const [ledgerProduct, setLedgerProduct] = useState<Product | null>(null);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
@@ -356,7 +357,7 @@ export default function Inventory() {
               {filtered.map(p => {
                 const bar = getStockBar(p);
                 return (
-                  <tr key={p.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
+                  <tr key={p.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
                     <td className="table-cell">
                       <div className="flex items-center gap-2.5">
                         {p.image_url ? (
@@ -390,7 +391,7 @@ export default function Inventory() {
                         </span>
                       </div>
                     </td>
-                    <td className="table-cell text-right">
+                    <td className="table-cell text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => openEdit(p)} title="Edit" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-700 transition-colors">
                           <Pencil className="w-3.5 h-3.5" />
@@ -697,6 +698,86 @@ export default function Inventory() {
           )}
         </div>
       </Modal>
+
+      {/* Product Detail View */}
+      {viewProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setViewProduct(null)} />
+          <div className="relative bg-white rounded-xl shadow-card-lg w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
+              <p className="text-sm font-semibold text-neutral-900">{viewProduct.name}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setViewProduct(null); openEdit(viewProduct); }} className="btn-secondary text-xs">
+                  <Pencil className="w-3 h-3" /> Edit
+                </button>
+                <button onClick={() => setViewProduct(null)} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-neutral-100">
+                  <X className="w-3.5 h-3.5 text-neutral-500" />
+                </button>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Image */}
+              <div className="flex gap-4 items-start">
+                {viewProduct.image_url ? (
+                  <img src={viewProduct.image_url} alt={viewProduct.name} className="w-28 h-28 rounded-xl object-cover border border-neutral-100 shrink-0" />
+                ) : (
+                  <div className="w-28 h-28 rounded-xl bg-neutral-100 flex items-center justify-center shrink-0">
+                    <ImagePlus className="w-8 h-8 text-neutral-300" />
+                  </div>
+                )}
+                <div className="flex-1 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`badge text-[10px] font-semibold uppercase tracking-wider ${viewProduct.category === 'Astro Products' ? 'bg-primary-50 text-primary-700' : viewProduct.category === 'Vastu Items' ? 'bg-accent-50 text-accent-700' : 'bg-blue-50 text-blue-700'}`}>{viewProduct.category}</span>
+                  </div>
+                  <p className="text-sm font-bold text-neutral-900">{viewProduct.name}</p>
+                  {viewProduct.description && <p className="text-xs text-neutral-500">{viewProduct.description}</p>}
+                  <p className="text-[10px] text-neutral-400 font-mono">{viewProduct.sku}</p>
+                </div>
+              </div>
+              {/* Details grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Sell Price</p>
+                  <p className="text-sm font-bold text-primary-700">{formatCurrency(viewProduct.selling_price)}</p>
+                </div>
+                {isAdmin && (
+                  <div className="bg-neutral-50 rounded-lg p-3">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Buy Price</p>
+                    <p className="text-sm font-bold text-neutral-700">{formatCurrency(viewProduct.purchase_price)}</p>
+                  </div>
+                )}
+                <div className={`rounded-lg p-3 ${viewProduct.stock_quantity <= 0 ? 'bg-error-50' : viewProduct.stock_quantity <= viewProduct.low_stock_alert ? 'bg-warning-50' : 'bg-success-50'}`}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">In Stock</p>
+                  <p className={`text-sm font-bold ${viewProduct.stock_quantity <= 0 ? 'text-error-700' : viewProduct.stock_quantity <= viewProduct.low_stock_alert ? 'text-warning-700' : 'text-success-700'}`}>
+                    {viewProduct.stock_quantity} {viewProduct.unit}
+                  </p>
+                </div>
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Unit</p>
+                  <p className="text-xs font-semibold text-neutral-700">{viewProduct.unit}</p>
+                </div>
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Low Stock Alert</p>
+                  <p className="text-xs font-semibold text-neutral-700">{viewProduct.low_stock_alert}</p>
+                </div>
+                <div className={`rounded-lg p-3 ${viewProduct.is_active ? 'bg-success-50' : 'bg-neutral-100'}`}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Status</p>
+                  <p className={`text-xs font-bold ${viewProduct.is_active ? 'text-success-700' : 'text-neutral-500'}`}>{viewProduct.is_active ? 'Active' : 'Inactive'}</p>
+                </div>
+              </div>
+              {/* Quick actions */}
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => { setViewProduct(null); openStockModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
+                  <ArrowUpDown className="w-3 h-3" /> Stock In/Out
+                </button>
+                <button onClick={() => { setViewProduct(null); openLedgerModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
+                  <History className="w-3 h-3" /> View Movements
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={!!confirmProduct}

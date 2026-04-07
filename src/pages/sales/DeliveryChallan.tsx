@@ -20,6 +20,7 @@ interface LineItem {
   unit_price: string;
   discount_pct: string;
   total_price: number;
+  godown_id: string;
 }
 
 interface ChallanItem {
@@ -62,23 +63,26 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [deleteTarget, setDeleteTarget] = useState<DCType | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loadingSO, setLoadingSO] = useState(false);
+  const [godowns, setGodowns] = useState<{id: string; name: string}[]>([]);
 
   const [form, setForm] = useState(emptyForm);
-  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
+  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    const [challansRes, productsRes, customersRes, soRes] = await Promise.all([
+    const [challansRes, productsRes, customersRes, soRes, godownsRes] = await Promise.all([
       supabase.from('delivery_challans').select('*').order('created_at', { ascending: false }),
       supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status').in('status', ['confirmed', 'dispatched', 'delivered']).order('created_at', { ascending: false }),
+      supabase.from('godowns').select('id, name').eq('is_active', true).order('name'),
     ]);
     const allChallans = challansRes.data || [];
     setChallans(allChallans);
     setProducts(productsRes.data || []);
     setCustomers(customersRes.data || []);
+    setGodowns(godownsRes.data || []);
     const linkedSOIds = new Set(allChallans.filter(c => c.sales_order_id && c.status !== 'cancelled').map(c => c.sales_order_id));
     const allSOs = (soRes.data || []) as SalesOrder[];
     setSalesOrders(allSOs.filter(so => !linkedSOIds.has(so.id)));
@@ -136,6 +140,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         unit_price: String(i.unit_price),
         discount_pct: String(i.discount_pct || 0),
         total_price: i.total_price,
+        godown_id: (i as Record<string,string>).godown_id || godowns[0]?.id || '',
       })));
     }
     setLoadingSO(false);
@@ -163,6 +168,16 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       next[i].total_price = calcTotal(next[i].quantity, next[i].unit_price, next[i].discount_pct);
       return next;
     });
+
+    // Auto-select best godown when product chosen
+    if (field === 'product_id' && value) {
+      const { data: stockRows } = await supabase
+        .from('godown_stock').select('godown_id, quantity')
+        .eq('product_id', value).gt('quantity', 0)
+        .order('quantity', { ascending: false }).limit(1);
+      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: bestGodown}; return next; });
+    }
 
     if (field === 'product_id' && value && form.customer_id) {
       const rate = await getSmartRate(form.customer_id, value, products.find(p => p.id === value)?.selling_price || 0);
@@ -208,6 +223,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           unit_price: parseFloat(i.unit_price) || 0,
           discount_pct: parseFloat(i.discount_pct) || 0,
           total_price: i.total_price,
+          godown_id: i.godown_id || null,
         }))
       );
       if (form.sales_order_id) {
@@ -318,8 +334,9 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             unit_price: String(i.unit_price || 0),
             discount_pct: String(i.discount_pct || 0),
             total_price: i.total_price || 0,
+            godown_id: (i as Record<string,string>).godown_id || '',
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
     setShowModal(true);
   };
@@ -533,7 +550,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-neutral-700">Items</p>
-              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }])}
+              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }])}
                 className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-hidden">
@@ -541,9 +558,10 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                 <thead className="bg-neutral-50">
                   <tr>
                     <th className="table-header text-left">Product</th>
-                    <th className="table-header text-center w-16">Unit</th>
-                    <th className="table-header text-right w-20">Qty</th>
-                    <th className="table-header text-right w-24">Price (₹)</th>
+                    <th className="table-header text-left w-28">Godown</th>
+                    <th className="table-header text-center w-14">Unit</th>
+                    <th className="table-header text-right w-16">Qty</th>
+                    <th className="table-header text-right w-20">Price (₹)</th>
                     <th className="table-header text-right w-16">Disc%</th>
                     <th className="table-header text-right w-24">Total</th>
                     <th className="table-header w-8" />
@@ -559,6 +577,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                         </select>
                         {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
                       </td>
+                      <td className="px-3 py-2 w-28"><select value={item.godown_id} onChange={e => { const gid=e.target.value; setItems(prev=>{const next=[...prev];next[i]={...next[i],godown_id:gid};return next;}); }} className="input text-xs py-1">{godowns.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</select></td>
                       <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs text-center" /></td>
                       <td className="px-3 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" /></td>
                       <td className="px-3 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
