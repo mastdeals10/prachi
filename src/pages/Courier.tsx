@@ -37,7 +37,7 @@ const emptyForm = {
   tracking_id: '', weight_kg: '', charges: '', status: 'booked',
   notes: '', sales_order_id: '',
   // address fields for label
-  customer_address: '', customer_city: '', customer_state: '', customer_pincode: '', customer_phone: '',
+  customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', customer_phone: '',
 };
 
 interface CourierProps {
@@ -70,6 +70,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
         customer_name: prefillFromDC.customer_name || '',
         customer_phone: prefillFromDC.customer_phone || '',
         customer_address: prefillFromDC.customer_address || '',
+        customer_address2: prefillFromDC.customer_address2 || '',
         customer_city: prefillFromDC.customer_city || '',
         customer_state: prefillFromDC.customer_state || '',
         customer_pincode: prefillFromDC.customer_pincode || '',
@@ -112,7 +113,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       status: e.status,
       notes: e.notes || '',
       sales_order_id: e.sales_order_id || '',
-      customer_address: '',
+      customer_address: '', customer_address2: '',
       customer_city: '', customer_state: '', customer_pincode: '', customer_phone: '',
     });
     setShowModal(true);
@@ -125,7 +126,8 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       customer_id: id,
       customer_name: c?.name || f.customer_name,
       customer_phone: c?.phone || '',
-      customer_address: (c as Customer & { address?: string })?.address || '',
+      customer_address: (c as Customer & { address?: string; address2?: string })?.address || '',
+      customer_address2: (c as Customer & { address?: string; address2?: string })?.address2 || '',
       customer_city: c?.city || '',
       customer_state: c?.state || '',
       customer_pincode: c?.pincode || '',
@@ -172,81 +174,74 @@ export default function Courier({ prefillFromDC }: CourierProps) {
 
   const openLabel = async (e: CourierEntry) => {
     // Fetch customer address if available
-    let addr = { address: '', city: '', state: '', pincode: '', phone: '' };
+    let addr = { address: '', address2: '', city: '', state: '', pincode: '', phone: '' };
     if (e.customer_id) {
-      const { data: c } = await supabase.from('customers').select('address, city, state, pincode, phone').eq('id', e.customer_id).maybeSingle();
-      if (c) addr = c;
+      const { data: c } = await supabase.from('customers').select('address, address2, city, state, pincode, phone').eq('id', e.customer_id).maybeSingle();
+      if (c) addr = { address: c.address || '', address2: (c as Record<string,string>).address2 || '', city: c.city || '', state: c.state || '', pincode: c.pincode || '', phone: c.phone || '' };
     }
-    setPrintEntry({ ...e, customer_address: addr.address || '', customer_city: addr.city || '', customer_state: addr.state || '', customer_pincode: addr.pincode || '', customer_phone: addr.phone || e.customer_name } as CourierEntry & typeof emptyForm);
+    setPrintEntry({ ...e, customer_address: addr.address || '', customer_address2: addr.address2 || '', customer_city: addr.city || '', customer_state: addr.state || '', customer_pincode: addr.pincode || '', customer_phone: addr.phone || '' } as CourierEntry & typeof emptyForm);
   };
 
   const printLabel = () => {
     if (!printEntry) return;
-    // Use hidden iframe — avoids blank popup from document.write being blocked
     const existingFrame = document.getElementById('label-print-frame');
     if (existingFrame) existingFrame.remove();
     const iframe = document.createElement('iframe');
     iframe.id = 'label-print-frame';
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:297mm;height:210mm;border:none;';
     document.body.appendChild(iframe);
-    const fromLines = [
-      `<strong style="font-size:15px">${company.name}</strong>`,
-      company.tagline ? `<span style="font-size:11px;color:#666">${company.tagline}</span>` : '',
-      company.address1 || '',
-      company.address2 || '',
-      [company.city, company.state, company.pincode].filter(Boolean).join(', '),
-      company.phone || '',
-    ].filter(Boolean).join('<br>');
-    const toLines = [
-      `<strong style="font-size:15px">${printEntry.customer_name}</strong>`,
-      printEntry.customer_phone || '',
-      printEntry.customer_address || '',
+    // Build address lines — each on its own line
+    const toAddrParts = [
+      printEntry.customer_address,
+      printEntry.customer_address2,
       [printEntry.customer_city, printEntry.customer_state, printEntry.customer_pincode].filter(Boolean).join(', '),
-    ].filter(Boolean).join('<br>');
+    ].filter(Boolean);
+    const fromAddrParts = [
+      company.address1,
+      company.address2,
+      [company.city, company.state, company.pincode].filter(Boolean).join(', '),
+    ].filter(Boolean);
+    // Logo: use /pflogo.png served from public folder
+    const logoTag = `<img src="/pflogo.png" style="height:44px;width:auto;object-fit:contain" onerror="this.style.display='none'" />`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Shipping Label</title>
 <style>
-  @page { size: A4 landscape; margin: 8mm; }
+  @page { size: A4 landscape; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; background: white; }
-  .wrap { border: 3px solid #000; max-width: 260mm; margin: 0 auto; }
-  .hdr { background: #111; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
-  .hdr-title { font-size: 22px; font-weight: 900; letter-spacing: 3px; }
-  .hdr-meta { text-align: right; font-size: 11px; line-height: 1.6; }
-  .addrs { display: grid; grid-template-columns: 3fr 2fr; border-top: none; }
-  .addr { padding: 20px 18px; min-height: 80mm; }
-  .addr + .addr { border-left: 2px solid #ccc; }
-  .lbl { font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; color: #888; margin-bottom: 8px; display: block; }
-  .addr-text { font-size: 14px; line-height: 1.9; color: #111; }
-  .footer { border-top: 2px solid #000; display: grid; grid-template-columns: 1fr 1fr; }
-  .footer-cell { padding: 10px 16px; border-right: 1px solid #ccc; }
-  .footer-cell:last-child { border-right: none; }
-  .footer-lbl { font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: #666; }
-  .footer-val { font-size: 13px; font-weight: 700; margin-top: 2px; }
-  .tracking { font-family: monospace; font-size: 16px; font-weight: 900; letter-spacing: 2px; background: #f5f5f5; border: 1px solid #ccc; padding: 4px 10px; border-radius: 3px; display: inline-block; }
+  body { font-family: 'Arial', Helvetica, sans-serif; background: white; width: 297mm; height: 210mm; display: flex; align-items: center; justify-content: center; }
+  .wrap { border: 2.5px solid #222; width: 270mm; }
+  /* Top bar: logo left, empty right */
+  .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1.5px solid #ddd; }
+  .top-right { text-align: right; }
+  /* Main address section */
+  .addrs { display: grid; grid-template-columns: 55% 45%; min-height: 90mm; }
+  .ship-to { padding: 20px 22px 20px 20px; }
+  .from-col { padding: 20px 20px 20px 22px; border-left: 1.5px solid #ddd; }
+  .sec-lbl { font-size: 9px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: #888; margin-bottom: 10px; display: block; }
+  .name { font-size: 18px; font-weight: 800; color: #111; margin-bottom: 6px; }
+  .addr-line { font-size: 13px; color: #333; line-height: 1.7; margin: 0; }
+  .phone-line { font-size: 13px; color: #333; margin-top: 6px; }
+  .from-name { font-size: 15px; font-weight: 800; color: #111; margin-bottom: 4px; }
+  .from-tagline { font-size: 11px; color: #888; margin-bottom: 8px; }
+  .from-line { font-size: 12px; color: #444; line-height: 1.7; }
 </style></head><body>
 <div class="wrap">
-  <div class="hdr">
-    <span class="hdr-title">SHIPPING LABEL</span>
-    <div class="hdr-meta">Date: ${printEntry.courier_date}<br>Via: ${printEntry.courier_company}</div>
+  <div class="top-bar">
+    <div>${logoTag}</div>
+    <div class="top-right"></div>
   </div>
   <div class="addrs">
-    <div class="addr">
-      <span class="lbl">📦 SHIP TO:</span>
-      <div class="addr-text">${toLines}</div>
+    <div class="ship-to">
+      <span class="sec-lbl">SHIP TO:</span>
+      <div class="name">${printEntry.customer_name}</div>
+      ${toAddrParts.map(l => `<p class="addr-line">${l}</p>`).join('')}
+      ${printEntry.customer_phone ? `<p class="phone-line">Ph: ${printEntry.customer_phone}</p>` : ''}
     </div>
-    <div class="addr">
-      <span class="lbl">FROM:</span>
-      <div class="addr-text">${fromLines}</div>
-    </div>
-  </div>
-  <div class="footer">
-    <div class="footer-cell">
-      <div class="footer-lbl">Tracking / AWB</div>
-      <div class="footer-val">${printEntry.tracking_id ? `<span class="tracking">${printEntry.tracking_id}</span>` : '—'}</div>
-    </div>
-    <div class="footer-cell">
-      <div class="footer-lbl">Weight&nbsp;&nbsp;&nbsp;&nbsp;Remarks</div>
-      <div class="footer-val">${printEntry.weight_kg ? printEntry.weight_kg + ' kg' : '—'}&nbsp;&nbsp;&nbsp;${printEntry.notes || 'No Remarks'}</div>
+    <div class="from-col">
+      <span class="sec-lbl">FROM:</span>
+      <div class="from-name">${company.name}</div>
+      ${company.tagline ? `<div class="from-tagline">${company.tagline}</div>` : ''}
+      ${fromAddrParts.map(l => `<p class="from-line">${l}</p>`).join('')}
+      ${company.phone ? `<p class="from-line">Ph: ${company.phone}</p>` : ''}
     </div>
   </div>
 </div>
@@ -254,7 +249,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     const doc = iframe.contentWindow?.document;
     if (!doc) return;
     doc.open(); doc.write(html); doc.close();
-    setTimeout(() => { iframe.contentWindow?.print(); }, 300);
+    setTimeout(() => { iframe.contentWindow?.print(); }, 350);
   };
 
   const filtered = entries.filter(e => {
@@ -431,8 +426,12 @@ export default function Courier({ prefillFromDC }: CourierProps) {
             <input value={form.tracking_id} onChange={e => setForm(f => ({ ...f, tracking_id: e.target.value }))} className="input" placeholder="AWB / LR no." />
           </div>
           <div className="col-span-2">
-            <label className="label">Delivery Address (for label)</label>
-            <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street, Area..." />
+            <label className="label">Address Line 1</label>
+            <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street / House No." />
+          </div>
+          <div className="col-span-2">
+            <label className="label">Address Line 2</label>
+            <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input" placeholder="Area / Landmark" />
           </div>
           <div>
             <label className="label">City / State / PIN</label>
@@ -475,7 +474,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       {printEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setPrintEntry(null)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden">
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
               <p className="text-sm font-semibold text-neutral-800">Shipping Label Preview</p>
               <div className="flex gap-2">
@@ -484,42 +483,34 @@ export default function Courier({ prefillFromDC }: CourierProps) {
               </div>
             </div>
             <div className="p-5">
-              <div className="border-2 border-neutral-800 rounded-lg overflow-hidden text-sm">
-                <div className="bg-neutral-900 text-white px-4 py-3 flex justify-between items-center">
-                  <span className="text-base font-bold tracking-widest">SHIPPING LABEL</span>
-                  <div className="text-right text-xs opacity-80">
-                    <div>{printEntry.courier_date}</div>
-                    <div>Via: {printEntry.courier_company}</div>
-                  </div>
+              <div className="border-2 border-neutral-700 rounded-lg overflow-hidden">
+                {/* Top bar: logo */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200">
+                  <img src="/pflogo.png" alt="Logo" className="h-9 w-auto object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+                  <span />
                 </div>
-                <div className="grid grid-cols-2 divide-x divide-neutral-200">
-                  <div className="p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-400 mb-2">FROM</p>
-                    <p className="font-bold text-neutral-900">{company.name}</p>
-                    {company.address1 && <p className="text-neutral-600 text-xs">{company.address1}</p>}
-                    {company.address2 && <p className="text-neutral-600 text-xs">{company.address2}</p>}
-                    {(company.city || company.pincode) && <p className="text-neutral-600 text-xs">{[company.city, company.state, company.pincode].filter(Boolean).join(', ')}</p>}
-                    {company.phone && <p className="text-neutral-600 text-xs">{company.phone}</p>}
-                  </div>
-                  <div className="p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-400 mb-2">TO (SHIP TO)</p>
-                    <p className="font-bold text-neutral-900">{printEntry.customer_name}</p>
-                    {printEntry.customer_phone && <p className="text-neutral-600 text-xs">{printEntry.customer_phone}</p>}
-                    {printEntry.customer_address && <p className="text-neutral-600 text-xs">{printEntry.customer_address}</p>}
+                {/* Address columns */}
+                <div className="grid grid-cols-2 divide-x divide-neutral-200 min-h-[160px]">
+                  {/* SHIP TO — left, larger */}
+                  <div className="p-5">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-neutral-400 mb-3">SHIP TO:</p>
+                    <p className="text-base font-black text-neutral-900 mb-1">{printEntry.customer_name}</p>
+                    {printEntry.customer_address && <p className="text-sm text-neutral-600">{printEntry.customer_address}</p>}
+                    {printEntry.customer_address2 && <p className="text-sm text-neutral-600">{printEntry.customer_address2}</p>}
                     {(printEntry.customer_city || printEntry.customer_pincode) && (
-                      <p className="text-neutral-600 text-xs">{[printEntry.customer_city, printEntry.customer_state, printEntry.customer_pincode].filter(Boolean).join(', ')}</p>
+                      <p className="text-sm text-neutral-600">{[printEntry.customer_city, printEntry.customer_state, printEntry.customer_pincode].filter(Boolean).join(', ')}</p>
                     )}
+                    {printEntry.customer_phone && <p className="text-sm text-neutral-600 mt-1">Ph: {printEntry.customer_phone}</p>}
                   </div>
-                </div>
-                <div className="border-t border-neutral-200 px-4 py-2 flex items-center justify-between bg-neutral-50">
-                  <div>
-                    {printEntry.tracking_id
-                      ? <span className="font-mono text-xs font-bold bg-white border border-neutral-300 px-2 py-0.5 rounded">📦 {printEntry.tracking_id}</span>
-                      : <span className="text-neutral-400 text-xs">No tracking number</span>}
-                  </div>
-                  <div className="text-xs text-neutral-500">
-                    {printEntry.weight_kg ? `${printEntry.weight_kg} kg` : ''}
-                    {printEntry.notes ? ` · ${printEntry.notes}` : ''}
+                  {/* FROM — right */}
+                  <div className="p-5">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-neutral-400 mb-3">FROM:</p>
+                    <p className="text-sm font-bold text-neutral-900">{company.name}</p>
+                    {company.tagline && <p className="text-[11px] text-neutral-400 mb-1">{company.tagline}</p>}
+                    {company.address1 && <p className="text-xs text-neutral-600">{company.address1}</p>}
+                    {company.address2 && <p className="text-xs text-neutral-600">{company.address2}</p>}
+                    {(company.city || company.pincode) && <p className="text-xs text-neutral-600">{[company.city, company.state, company.pincode].filter(Boolean).join(', ')}</p>}
+                    {company.phone && <p className="text-xs text-neutral-600">Ph: {company.phone}</p>}
                   </div>
                 </div>
               </div>
