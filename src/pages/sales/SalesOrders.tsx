@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, generateId, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -9,6 +9,9 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useDateRange } from '../../contexts/DateRangeContext';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
+import { fetchCompanies } from '../../lib/companiesService';
+import type { Company } from '../../lib/companiesService';
+import SalesOrderPrint from './SalesOrderPrint';
 import type { SalesOrder, SalesOrderItem, Product, Customer, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -46,6 +49,10 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [showViewModal, setShowViewModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SalesOrder | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
+  const [printOrder, setPrintOrder] = useState<SalesOrder | null>(null);
+  const [printItems, setPrintItems] = useState<SalesOrderItem[]>([]);
+  const [printCompany, setPrintCompany] = useState<Company | undefined>(undefined);
 
   const [form, setForm] = useState({
     customer_id: '', customer_name: '', customer_phone: '',
@@ -182,7 +189,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const total = subtotal + (parseFloat(form.courier_charges) || 0) - (parseFloat(form.discount_amount) || 0);
 
   const handleSave = async () => {
-    const soNumber = generateId('SO');
+    const soNumber = await nextDocNumber('SO', supabase);
     const { data: so } = await supabase.from('sales_orders').insert({
       so_number: soNumber,
       customer_id: form.customer_id || null,
@@ -303,6 +310,22 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     setShowViewModal(true);
   };
 
+  const openSOPrint = async (order: SalesOrder) => {
+    const { data: itemsData } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', order.id);
+    setPrintOrder(order);
+    setPrintItems((itemsData || []) as SalesOrderItem[]);
+    // detect company from first product
+    const firstProdId = (itemsData || []).find(i => i.product_id)?.product_id;
+    if (firstProdId) {
+      const { data: prod } = await supabase.from('products').select('company_id').eq('id', firstProdId).maybeSingle();
+      if (prod?.company_id) {
+        const cos = await fetchCompanies();
+        setPrintCompany(cos.find(c => c.id === prod.company_id) || undefined);
+      } else { setPrintCompany(undefined); }
+    } else { setPrintCompany(undefined); }
+    setShowPrint(true);
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     await supabase.from('sales_orders').update({ status: 'cancelled' }).eq('id', deleteTarget.id);
@@ -340,7 +363,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       }
 
       const { data: inv } = await supabase.from('invoices').insert({
-        invoice_number: generateId('INV'),
+        invoice_number: await nextDocNumber('INV', supabase),
         sales_order_id: order.id,
         customer_id: order.customer_id || null,
         customer_name: order.customer_name,
@@ -421,7 +444,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       }
 
       const { data: dc } = await supabase.from('delivery_challans').insert({
-        challan_number: generateId('DC'),
+        challan_number: await nextDocNumber('DC', supabase),
         sales_order_id: order.id,
         customer_id: order.customer_id || null,
         customer_name: order.customer_name,
@@ -567,7 +590,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                             </button>
                           </>
                         )}
-                        <button onClick={() => openView(o)} title="View / Print Proforma" className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openView(o)} title="View" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openSOPrint(o)} title="Print Proforma" className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
                         {(o.status === 'confirmed' || o.status === 'draft') && (
                           <button onClick={() => openEdit(o)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
                         )}
@@ -944,6 +968,22 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         confirmLabel="Cancel Order"
         isDanger
       />
+
+      {/* Full-screen print preview — same UX as Invoice */}
+      {showPrint && printOrder && (
+        <div className="fixed inset-0 z-50 bg-neutral-100 overflow-auto">
+          <div className="no-print flex items-center justify-between bg-white border-b border-neutral-200 px-5 py-3">
+            <p className="text-sm font-semibold text-neutral-800">Proforma — {printOrder.so_number}</p>
+            <div className="flex gap-2">
+              <button onClick={() => window.print()} className="btn-primary"><Printer className="w-3.5 h-3.5" /> Print / Save PDF</button>
+              <button onClick={() => setShowPrint(false)} className="btn-secondary">Close</button>
+            </div>
+          </div>
+          <div className="py-6 print-content">
+            <SalesOrderPrint order={printOrder} items={printItems} companyOverride={printCompany} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

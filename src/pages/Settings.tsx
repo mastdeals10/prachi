@@ -1,25 +1,27 @@
 import { useState } from 'react';
-import { Building2, Warehouse, Layers } from 'lucide-react';
+import { Building2, Warehouse, Layers, Users } from 'lucide-react';
 import CompanySettingsTab from './settings/CompanySettingsTab';
 import CompaniesTab from './settings/CompaniesTab';
 import GodownsTab from './settings/GodownsTab';
+import UsersTab from './settings/UsersTab';
 
-type SettingsTab = 'companies' | 'company' | 'godowns';
+type SettingsTab = 'companies' | 'company' | 'godowns' | 'users';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('companies');
 
   const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'companies', label: 'Billing Entities', icon: Layers },
-    { id: 'company', label: 'Default Settings', icon: Building2 },
-    { id: 'godowns', label: 'Godowns', icon: Warehouse },
+    { id: 'users',     label: 'Users',            icon: Users },
+    { id: 'company',   label: 'Default Settings', icon: Building2 },
+    { id: 'godowns',   label: 'Godowns',          icon: Warehouse },
   ];
 
   return (
     <div className="flex-1 overflow-y-auto bg-neutral-50">
       <div className="bg-white border-b border-neutral-100 px-5 py-3">
         <h1 className="text-sm font-bold text-neutral-900">Settings</h1>
-        <p className="text-[11px] text-neutral-400 mt-0.5">Manage billing entities, company details, warehouse locations</p>
+        <p className="text-[11px] text-neutral-400 mt-0.5">Billing entities, users, company details, warehouses</p>
       </div>
       <div className="bg-white border-b border-neutral-200 px-5">
         <div className="flex gap-1">
@@ -40,8 +42,9 @@ export default function Settings() {
       </div>
       <div className="flex-1">
         {activeTab === 'companies' && <CompaniesTab />}
-        {activeTab === 'company' && <CompanySettingsTab />}
-        {activeTab === 'godowns' && <GodownsTab />}
+        {activeTab === 'users'     && <UsersTab />}
+        {activeTab === 'company'   && <CompanySettingsTab />}
+        {activeTab === 'godowns'   && <GodownsTab />}
       </div>
     </div>
   );

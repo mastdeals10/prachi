@@ -45,12 +45,23 @@ export const numberToWords = (num: number): string => {
 };
 
 export const generateId = (prefix: string): string => {
+  // Legacy fallback — used only where supabase RPC is not available (e.g. courier dispatch_number)
   const now = new Date();
   const year = now.getFullYear().toString().slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const random = Math.floor(Math.random() * 9000) + 1000;
   return `${prefix}-${year}${month}-${random}`;
 };
+
+/** Calls the DB atomic sequence — use for SO, DC, INV, EXP */
+export async function nextDocNumber(prefix: 'SO' | 'DC' | 'INV' | 'EXP', supabaseClient: import('@supabase/supabase-js').SupabaseClient): Promise<string> {
+  const { data, error } = await supabaseClient.rpc('next_document_number', { p_prefix: prefix });
+  if (error || !data) {
+    // Fallback to client-side if RPC fails
+    return generateId(prefix);
+  }
+  return data as string;
+}
 
 export const getStatusColor = (status: string): string => {
   const map: Record<string, string> = {

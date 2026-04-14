@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Trash2, Eye, Warehouse } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, formatDateInput, generateId, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -446,7 +446,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     invDiscount: number,
     invTotal: number,
   ) => {
-    const invNumber = generateId('INV');
+    const invNumber = await nextDocNumber('INV', supabase);
     const { data: inv } = await supabase.from('invoices').insert({
       invoice_number: invNumber,
       sales_order_id: form.sales_order_id || null,

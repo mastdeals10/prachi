@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatDate, formatCurrency, generateId, exportToCSV } from '../../lib/utils';
+import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import { getSmartRate } from '../../lib/rateCardService';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -196,7 +196,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const subtotal = items.reduce((s, i) => s + i.total_price, 0);
 
   const handleSave = async () => {
-    const challanNumber = generateId('DC');
+    const challanNumber = await nextDocNumber('DC', supabase);
     const { data: challan } = await supabase.from('delivery_challans').insert({
       challan_number: challanNumber,
       sales_order_id: form.sales_order_id || null,
