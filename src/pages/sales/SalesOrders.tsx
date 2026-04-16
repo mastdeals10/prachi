@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse } from 'lucide-react';
+import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
@@ -564,14 +564,36 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           <div className="card">
             <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Total Orders</p>
             <p className="text-2xl font-bold text-neutral-900 mt-1">{orders.length}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">{orders.filter(o => o.status === 'delivered').length} delivered</p>
           </div>
-          <div className="card">
-            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Pending Confirmation</p>
+          <div className="card border-l-4 border-l-blue-400">
+            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Awaiting Action</p>
             <p className="text-2xl font-bold text-blue-600 mt-1">{pendingOrders}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">Need challan or invoice</p>
           </div>
           <div className="card">
             <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Total Value</p>
             <p className="text-2xl font-bold text-neutral-900 mt-1">{formatCurrency(totalValue)}</p>
+          </div>
+        </div>
+
+        <div className="bg-white border border-neutral-100 rounded-xl px-4 py-3">
+          <p className="text-[9px] font-bold text-neutral-400 uppercase tracking-widest mb-2">Sales Flow</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {[
+              { label: 'Sales Order Created', color: 'bg-blue-50 text-blue-700 border-blue-100', icon: FileText },
+              { label: 'Delivery Challan', color: 'bg-orange-50 text-orange-700 border-orange-100', icon: Truck },
+              { label: 'Invoice Raised', color: 'bg-green-50 text-green-700 border-green-100', icon: Receipt },
+              { label: 'Dispatch', color: 'bg-teal-50 text-teal-700 border-teal-100', icon: Send },
+            ].map((step, i, arr) => (
+              <React.Fragment key={i}>
+                <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium ${step.color}`}>
+                  <step.icon className="w-3.5 h-3.5" />
+                  {step.label}
+                </div>
+                {i < arr.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-neutral-300" />}
+              </React.Fragment>
+            ))}
           </div>
         </div>
 

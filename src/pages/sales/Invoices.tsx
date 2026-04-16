@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Trash2, Eye, Warehouse } from 'lucide-react';
+import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Trash2, Eye, Warehouse, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
@@ -866,19 +866,23 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         <div className="grid grid-cols-4 gap-4">
           <div className="card">
             <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Total Invoices</p>
-            <p className="text-2xl font-bold text-neutral-900 mt-1">{invoices.length}</p>
+            <p className="text-2xl font-bold text-neutral-900 mt-1">{invoices.filter(i => i.status !== 'cancelled').length}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">{invoices.filter(i => i.status === 'paid').length} paid · {invoices.filter(i => i.status === 'partial').length} partial</p>
           </div>
-          <div className="card">
-            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Outstanding</p>
+          <div className="card border-l-4 border-l-error-400">
+            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Pending Amount</p>
             <p className="text-2xl font-bold text-error-600 mt-1">{formatCurrency(totalOutstanding)}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">{invoices.filter(i => ['sent','partial','overdue'].includes(i.status)).length} unpaid invoices</p>
           </div>
-          <div className="card">
-            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Paid (All Time)</p>
+          <div className="card border-l-4 border-l-success-400">
+            <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Total Collected</p>
             <p className="text-2xl font-bold text-success-600 mt-1">{formatCurrency(paidThisMonth)}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">All time paid invoices</p>
           </div>
-          <div className="card">
+          <div className="card border-l-4 border-l-warning-400">
             <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Overdue</p>
             <p className="text-2xl font-bold text-warning-600 mt-1">{invoices.filter(i => i.status === 'overdue').length}</p>
+            <p className="text-[10px] text-neutral-400 mt-1">Require immediate follow-up</p>
           </div>
         </div>
 
@@ -906,66 +910,85 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => (
-                <tr key={inv.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                  <td className="table-cell font-medium text-primary-700">{inv.invoice_number}</td>
-                  <td className="table-cell">
-                    <p className="font-medium">{inv.customer_name}</p>
-                    <p className="text-xs text-neutral-400">{inv.customer_phone}</p>
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex flex-col gap-0.5">
-                      {inv.sales_order_id && soMap[inv.sales_order_id] && (
-                        <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded w-fit">SO: {soMap[inv.sales_order_id]}</span>
+              {filtered.map(inv => {
+                const isPaid = inv.status === 'paid' || inv.outstanding_amount <= 0;
+                const isOverdue = inv.status === 'overdue';
+                return (
+                  <tr key={inv.id} className={`border-b border-neutral-50 hover:bg-neutral-50 transition-colors ${isOverdue ? 'bg-error-50/30' : ''}`}>
+                    <td className="table-cell font-medium text-primary-700">{inv.invoice_number}</td>
+                    <td className="table-cell">
+                      <p className="font-medium">{inv.customer_name}</p>
+                      <p className="text-xs text-neutral-400">{inv.customer_phone}</p>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex flex-col gap-0.5">
+                        {inv.sales_order_id && soMap[inv.sales_order_id] && (
+                          <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded w-fit">SO: {soMap[inv.sales_order_id]}</span>
+                        )}
+                        {(inv as Record<string, unknown>).delivery_challan_id && dcMap[(inv as Record<string, unknown>).delivery_challan_id as string] && (
+                          <span className="text-[10px] font-medium bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded w-fit">DC: {dcMap[(inv as Record<string, unknown>).delivery_challan_id as string]}</span>
+                        )}
+                        {!inv.sales_order_id && !(inv as Record<string, unknown>).delivery_challan_id && (
+                          <span className="text-neutral-300 text-xs">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell text-neutral-500">{formatDate(inv.invoice_date)}</td>
+                    <td className="table-cell text-right">
+                      <p className="font-semibold text-neutral-900">{formatCurrency(inv.total_amount)}</p>
+                      {inv.paid_amount > 0 && !isPaid && (
+                        <p className="text-[10px] text-success-600 mt-0.5">Paid: {formatCurrency(inv.paid_amount)}</p>
                       )}
-                      {(inv as Record<string, unknown>).delivery_challan_id && dcMap[(inv as Record<string, unknown>).delivery_challan_id as string] && (
-                        <span className="text-[10px] font-medium bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded w-fit">DC: {dcMap[(inv as Record<string, unknown>).delivery_challan_id as string]}</span>
+                    </td>
+                    <td className="table-cell text-right">
+                      {isPaid ? (
+                        <span className="inline-flex items-center gap-1 text-success-600 font-medium text-xs">
+                          <CheckCircle className="w-3 h-3" /> Fully Paid
+                        </span>
+                      ) : (
+                        <span className={`font-semibold text-sm ${isOverdue ? 'text-error-700' : 'text-error-600'}`}>
+                          {formatCurrency(inv.outstanding_amount)}
+                        </span>
                       )}
-                      {!inv.sales_order_id && !(inv as Record<string, unknown>).delivery_challan_id && (
-                        <span className="text-neutral-300 text-xs">—</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="table-cell text-neutral-500">{formatDate(inv.invoice_date)}</td>
-                  <td className="table-cell text-right font-semibold">{formatCurrency(inv.total_amount)}</td>
-                  <td className="table-cell text-right">
-                    {inv.outstanding_amount > 0 ? (
-                      <span className="text-error-600 font-medium">{formatCurrency(inv.outstanding_amount)}</span>
-                    ) : <span className="text-success-600 font-medium">Paid</span>}
-                  </td>
-                  <td className="table-cell"><StatusBadge status={inv.status} /></td>
-                  <td className="table-cell text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {inv.outstanding_amount > 0 && inv.status !== 'cancelled' && (
-                        <button onClick={() => openPayment(inv)} title="Record Payment"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-primary-50 text-primary-600 transition-colors">
-                          <CreditCard className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button onClick={() => openView(inv)} title="View"
-                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => openPrint(inv)} title="Print / PDF"
-                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
-                        <Printer className="w-3.5 h-3.5" />
-                      </button>
-                      {inv.status !== 'paid' && inv.status !== 'cancelled' && (
-                        <button onClick={() => openEdit(inv)} title="Edit"
+                    </td>
+                    <td className="table-cell"><StatusBadge status={inv.status} /></td>
+                    <td className="table-cell text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {!isPaid && inv.status !== 'cancelled' ? (
+                          <button onClick={() => openPayment(inv)} title="Record Payment"
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors text-[10px] font-medium">
+                            <CreditCard className="w-3 h-3" /> Pay
+                          </button>
+                        ) : inv.status === 'paid' ? (
+                          <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-success-50 text-success-600 text-[10px] font-medium cursor-default">
+                            <CheckCircle className="w-3 h-3" /> Paid
+                          </span>
+                        ) : null}
+                        <button onClick={() => openView(inv)} title="View"
                           className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
-                          <Pencil className="w-3.5 h-3.5" />
+                          <Eye className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                      {inv.status !== 'paid' && inv.status !== 'cancelled' && (
-                        <button onClick={() => openDelete(inv)} title="Cancel Invoice"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
+                        <button onClick={() => openPrint(inv)} title="Print / PDF"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
+                          <Printer className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <button onClick={() => openEdit(inv)} title="Edit"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <button onClick={() => openDelete(inv)} title="Cancel Invoice"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filtered.length === 0 && <EmptyState icon={FileText} title="No invoices found" description="Select a Sales Order to create an invoice." />}
@@ -1441,48 +1464,64 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       )}
 
       <Modal isOpen={showPayModal} onClose={() => setShowPayModal(false)} title="Record Payment"
-        subtitle={selectedInvoice ? `Invoice ${selectedInvoice.invoice_number} - ${selectedInvoice.customer_name}` : ''}
+        subtitle={selectedInvoice ? `Invoice ${selectedInvoice.invoice_number} · ${selectedInvoice.customer_name}` : ''}
         size="sm"
         footer={
           <>
             <button onClick={() => setShowPayModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handlePayment} className="btn-primary">Record Payment</button>
+            <button onClick={handlePayment} disabled={!payForm.amount || parseFloat(payForm.amount) <= 0} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Record Payment</button>
           </>
         }>
         <div className="space-y-3">
           {selectedInvoice && (
-            <div className="bg-neutral-50 rounded-lg p-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-600">Invoice Total</span>
-                <span className="font-semibold">{formatCurrency(selectedInvoice.total_amount)}</span>
+            <div className="rounded-xl overflow-hidden border border-neutral-100">
+              <div className="bg-neutral-50 px-4 py-3 grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-0.5">Total</p>
+                  <p className="text-sm font-bold text-neutral-800">{formatCurrency(selectedInvoice.total_amount)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-0.5">Paid</p>
+                  <p className="text-sm font-bold text-success-600">{formatCurrency(selectedInvoice.paid_amount)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-0.5">Pending</p>
+                  <p className="text-sm font-bold text-error-600">{formatCurrency(selectedInvoice.outstanding_amount)}</p>
+                </div>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-600">Already Paid</span>
-                <span className="text-success-600 font-semibold">{formatCurrency(selectedInvoice.paid_amount)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-bold border-t border-neutral-200 pt-2 mt-2">
-                <span>Outstanding</span>
-                <span className="text-error-600">{formatCurrency(selectedInvoice.outstanding_amount)}</span>
-              </div>
+              {selectedInvoice.total_amount > 0 && (
+                <div className="h-1.5 bg-neutral-100">
+                  <div className="h-full bg-success-500 transition-all"
+                    style={{ width: `${Math.min(100, (selectedInvoice.paid_amount / selectedInvoice.total_amount) * 100)}%` }} />
+                </div>
+              )}
             </div>
           )}
-          <div>
-            <label className="label">Payment Date</label>
-            <input type="date" value={payForm.payment_date} onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} className="input" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Payment Date</label>
+              <input type="date" value={payForm.payment_date} onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} className="input" />
+            </div>
+            <div>
+              <label className="label">Payment Mode</label>
+              <select value={payForm.payment_mode} onChange={e => setPayForm(f => ({ ...f, payment_mode: e.target.value }))} className="input">
+                {['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'Card'].map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
           </div>
           <div>
-            <label className="label">Payment Amount</label>
-            <input type="number" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} className="input" />
+            <label className="label">Amount Received</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400 font-medium">₹</span>
+              <input type="number" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} className="input pl-7 text-base font-semibold" placeholder="0" />
+            </div>
+            {selectedInvoice && parseFloat(payForm.amount) > selectedInvoice.outstanding_amount && (
+              <p className="text-[10px] text-warning-600 mt-1">Amount exceeds outstanding balance</p>
+            )}
           </div>
           <div>
-            <label className="label">Payment Mode</label>
-            <select value={payForm.payment_mode} onChange={e => setPayForm(f => ({ ...f, payment_mode: e.target.value }))} className="input">
-              {['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'Card'].map(m => <option key={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Reference Number</label>
-            <input value={payForm.reference_number} onChange={e => setPayForm(f => ({ ...f, reference_number: e.target.value }))} className="input" placeholder="UTR / Cheque no. / Optional" />
+            <label className="label">Reference Number <span className="text-neutral-400 font-normal">(UTR / Cheque no.)</span></label>
+            <input value={payForm.reference_number} onChange={e => setPayForm(f => ({ ...f, reference_number: e.target.value }))} className="input" placeholder="Optional" />
           </div>
         </div>
       </Modal>

@@ -158,17 +158,24 @@ export default function GodownStockPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-neutral-900">Stock</h1>
-            <p className="text-xs text-neutral-500 mt-0.5">Godown-wise inventory levels · Click any product to see movement history</p>
+            <p className="text-xs text-neutral-500 mt-0.5">Godown-wise inventory · Click any product to see movement history</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-xs text-neutral-500">Stock Value</p>
+            <div className="text-right px-3 py-1.5 bg-neutral-50 rounded-lg">
+              <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Stock Value</p>
               <p className="text-sm font-bold text-neutral-800">{formatCurrency(totalValue)}</p>
             </div>
+            <div className="text-right px-3 py-1.5 bg-neutral-50 rounded-lg">
+              <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Products</p>
+              <p className="text-sm font-bold text-neutral-800">{displayProducts.length}</p>
+            </div>
             {lowCount > 0 && (
-              <div className="flex items-center gap-1.5 bg-warning-50 text-warning-700 px-3 py-1.5 rounded-lg">
+              <div className="flex items-center gap-1.5 bg-warning-50 border border-warning-100 text-warning-700 px-3 py-1.5 rounded-lg">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                <span className="text-xs font-medium">{lowCount} low stock</span>
+                <div>
+                  <p className="text-xs font-semibold">{lowCount} Low Stock</p>
+                  <p className="text-[9px]">Need restocking</p>
+                </div>
               </div>
             )}
           </div>
@@ -250,33 +257,46 @@ export default function GodownStockPage() {
                 <tbody>
                   {filtered.map(p => {
                     const isLow = p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert;
+                    const isOut = p.total_quantity === 0;
                     const stockPct = p.low_stock_alert > 0 ? Math.min(100, (p.total_quantity / (p.low_stock_alert * 3)) * 100) : 80;
 
                     return (
                       <tr
                         key={p.product_id}
-                        className="border-b border-neutral-50 hover:bg-primary-50/40 transition-colors cursor-pointer"
+                        className={`border-b border-neutral-50 hover:bg-primary-50/40 transition-colors cursor-pointer ${isLow ? 'bg-warning-50/30' : ''}`}
                         onClick={() => openDrillDown(p)}
                       >
-                        <td className="table-cell font-medium text-neutral-800 text-primary-700 hover:underline">{p.product_name}</td>
-                        <td className="table-cell text-xs text-neutral-500">{p.sku || '—'}</td>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2">
+                            {isLow && <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0" />}
+                            <span className="font-medium text-neutral-800 hover:text-primary-700">{p.product_name}</span>
+                          </div>
+                        </td>
+                        <td className="table-cell text-xs text-neutral-500 font-mono">{p.sku || '—'}</td>
                         <td className="table-cell text-right">
-                          <span className={`font-bold ${isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                          <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
                             {p.total_quantity}
                           </span>
+                          {p.low_stock_alert > 0 && (
+                            <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                          )}
                         </td>
                         <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
                         {activeTab === 'overall' && godowns.map(g => (
                           <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
-                            {p.godown_quantities[g.id] || 0}
+                            <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
+                              {p.godown_quantities[g.id] || 0}
+                            </span>
                           </td>
                         ))}
-                        <td className="table-cell text-right text-xs text-neutral-600">
+                        <td className="table-cell text-right text-xs font-medium text-neutral-600">
                           {formatCurrency(p.total_quantity * p.selling_price)}
                         </td>
                         <td className="table-cell">
-                          {isLow ? (
-                            <span className="badge bg-warning-50 text-warning-700">Low Stock</span>
+                          {isOut ? (
+                            <span className="badge bg-error-50 text-error-700 border border-error-100">Out of Stock</span>
+                          ) : isLow ? (
+                            <span className="badge bg-warning-50 text-warning-700 border border-warning-100">Low Stock</span>
                           ) : (
                             <span className="badge bg-success-50 text-success-700">In Stock</span>
                           )}
@@ -284,8 +304,8 @@ export default function GodownStockPage() {
                         <td className="table-cell w-20">
                           <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all ${isLow ? 'bg-warning-500' : 'bg-success-500'}`}
-                              style={{ width: `${stockPct}%` }}
+                              className={`h-full rounded-full transition-all ${isOut ? 'bg-error-500' : isLow ? 'bg-warning-500' : 'bg-success-500'}`}
+                              style={{ width: `${isOut ? 0 : stockPct}%` }}
                             />
                           </div>
                         </td>

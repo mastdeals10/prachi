@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Truck, Plus, CreditCard as Edit2, Search, CheckCircle, Clock, ArrowRight, Hash, Warehouse } from 'lucide-react';
+import { Truck, Plus, CreditCard as Edit2, Search, CheckCircle, Clock, ArrowRight, Hash, Warehouse, AlertCircle, Lock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatDate } from '../lib/utils';
 import { fetchGodowns } from '../services/godownService';
@@ -126,6 +126,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
   };
 
   const openEdit = (d: DispatchEntry) => {
+    if (d.status === 'delivered' || d.status === 'returned') return;
     setEditing(d);
     setForm({
       reference_type: (d.reference_type as 'sales_order' | 'invoice') || 'sales_order',
@@ -142,6 +143,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
       expected_delivery_date: d.expected_delivery_date || '',
       notes: d.notes || '',
       status: d.status,
+      godown_id: d.godown_id || '',
     });
     setShowModal(true);
   };
@@ -257,21 +259,31 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
 
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Pending', count: statusCounts.pending, color: 'bg-warning-50 text-warning-600', icon: Clock },
-            { label: 'Dispatched', count: statusCounts.dispatched, color: 'bg-blue-50 text-blue-600', icon: Truck },
-            { label: 'In Transit', count: statusCounts.in_transit, color: 'bg-primary-50 text-primary-600', icon: ArrowRight },
-            { label: 'Delivered', count: statusCounts.delivered, color: 'bg-success-50 text-success-600', icon: CheckCircle },
+            { label: 'Pending', value: 'pending', count: statusCounts.pending, color: 'bg-warning-50 text-warning-600', icon: Clock, hint: 'Not yet shipped' },
+            { label: 'Dispatched', value: 'dispatched', count: statusCounts.dispatched, color: 'bg-blue-50 text-blue-600', icon: Truck, hint: 'Shipped out' },
+            { label: 'In Transit', value: 'in_transit', count: statusCounts.in_transit, color: 'bg-primary-50 text-primary-600', icon: ArrowRight, hint: 'On the way' },
+            { label: 'Delivered', value: 'delivered', count: statusCounts.delivered, color: 'bg-success-50 text-success-600', icon: CheckCircle, hint: 'Completed' },
           ].map(kpi => (
-            <button key={kpi.label} onClick={() => setFilterStatus(kpi.label.toLowerCase().replace(' ', '_'))}
-              className={`card text-left hover:shadow-md transition-all ${filterStatus === kpi.label.toLowerCase().replace(' ', '_') ? 'ring-2 ring-primary-500' : ''}`}>
+            <button key={kpi.label} onClick={() => setFilterStatus(filterStatus === kpi.value ? 'all' : kpi.value)}
+              className={`card text-left hover:shadow-md transition-all ${filterStatus === kpi.value ? 'ring-2 ring-primary-500 shadow-md' : ''}`}>
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-2 ${kpi.color}`}>
                 <kpi.icon className="w-4 h-4" />
               </div>
               <p className="text-2xl font-bold text-neutral-900">{kpi.count}</p>
-              <p className="text-xs text-neutral-400 mt-0.5">{kpi.label}</p>
+              <p className="text-xs font-medium text-neutral-600 mt-0.5">{kpi.label}</p>
+              <p className="text-[10px] text-neutral-400">{kpi.hint}</p>
             </button>
           ))}
         </div>
+
+        {(statusCounts.pending + statusCounts.dispatched + statusCounts.in_transit) > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-xl">
+            <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+            <p className="text-xs text-blue-700">
+              <span className="font-semibold">{statusCounts.pending + statusCounts.dispatched + statusCounts.in_transit}</span> shipment{statusCounts.pending + statusCounts.dispatched + statusCounts.in_transit !== 1 ? 's' : ''} in progress — click <strong>Delivered</strong> once the customer confirms receipt
+            </p>
+          </div>
+        )}
 
         <div className="card">
           <div className="flex items-center gap-3 mb-4">
@@ -315,49 +327,73 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(d => (
-                    <tr key={d.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                      <td className="table-cell font-medium text-primary-700 font-mono text-xs">{d.dispatch_number}</td>
-                      <td className="table-cell font-medium text-neutral-800">{d.customer_name || '—'}</td>
-                      <td className="table-cell text-xs text-neutral-500">
-                        {d.godown_id ? (godowns.find(g => g.id === d.godown_id)?.name || '—') : '—'}
-                      </td>
-                      <td className="table-cell">
-                        <span className="flex items-center gap-1.5 text-xs">
-                          <span>{getModeIcon(d.dispatch_mode || '')}</span>
-                          <span>{d.dispatch_mode || '—'}</span>
-                        </span>
-                        {d.transport_name && <p className="text-[10px] text-neutral-400 mt-0.5">{d.transport_name}</p>}
-                      </td>
-                      <td className="table-cell">
-                        {d.lr_number ? (
-                          <span className="flex items-center gap-1 text-xs text-neutral-700">
-                            <Hash className="w-3 h-3 text-neutral-400" />{d.lr_number}
+                  {filtered.map(d => {
+                    const isDelivered = d.status === 'delivered';
+                    const isReturned = d.status === 'returned';
+                    const isLocked = isDelivered || isReturned;
+                    return (
+                      <tr key={d.id} className={`border-b border-neutral-50 hover:bg-neutral-50 transition-colors ${isDelivered ? 'opacity-75' : ''}`}>
+                        <td className="table-cell font-medium text-primary-700 font-mono text-xs">{d.dispatch_number}</td>
+                        <td className="table-cell font-medium text-neutral-800">{d.customer_name || '—'}</td>
+                        <td className="table-cell text-xs text-neutral-500">
+                          {d.godown_id ? (godowns.find(g => g.id === d.godown_id)?.name || '—') : '—'}
+                        </td>
+                        <td className="table-cell">
+                          <span className="flex items-center gap-1.5 text-xs">
+                            <span>{getModeIcon(d.dispatch_mode || '')}</span>
+                            <span>{d.dispatch_mode || '—'}</span>
                           </span>
-                        ) : <span className="text-neutral-300">—</span>}
-                      </td>
-                      <td className="table-cell text-xs text-neutral-600">{formatDate(d.dispatch_date)}</td>
-                      <td className="table-cell text-xs text-neutral-500">{d.expected_delivery_date ? formatDate(d.expected_delivery_date) : '—'}</td>
-                      <td className="table-cell">
-                        <span className={`badge capitalize ${getStatusColor(d.status)}`}>{d.status.replace('_', ' ')}</span>
-                      </td>
-                      <td className="table-cell text-xs text-neutral-500">
-                        {d.sales_order_id ? <span className="text-blue-600">Sales Order</span> : d.invoice_id ? <span className="text-green-600">Invoice</span> : '—'}
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => openEdit(d)} className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500 hover:text-primary-600 transition-colors">
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          {d.status !== 'delivered' && (
-                            <button onClick={() => markDelivered(d)} className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-success-50 text-success-700 hover:bg-success-100 transition-colors">
-                              <CheckCircle className="w-3 h-3" /> Delivered
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          {d.transport_name && <p className="text-[10px] text-neutral-400 mt-0.5">{d.transport_name}</p>}
+                        </td>
+                        <td className="table-cell">
+                          {d.lr_number ? (
+                            <span className="flex items-center gap-1 text-xs text-neutral-700">
+                              <Hash className="w-3 h-3 text-neutral-400" />{d.lr_number}
+                            </span>
+                          ) : <span className="text-neutral-300">—</span>}
+                        </td>
+                        <td className="table-cell text-xs text-neutral-600">{formatDate(d.dispatch_date)}</td>
+                        <td className="table-cell text-xs text-neutral-500">{d.expected_delivery_date ? formatDate(d.expected_delivery_date) : '—'}</td>
+                        <td className="table-cell">
+                          <span className={`badge capitalize ${getStatusColor(d.status)}`}>{d.status.replace('_', ' ')}</span>
+                        </td>
+                        <td className="table-cell">
+                          <div className="flex flex-col gap-0.5">
+                            {d.sales_order_id && (
+                              <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded w-fit">
+                                Sales Order
+                              </span>
+                            )}
+                            {d.invoice_id && (
+                              <span className="text-[10px] font-medium bg-green-50 text-green-700 px-1.5 py-0.5 rounded w-fit">
+                                Invoice
+                              </span>
+                            )}
+                            {!d.sales_order_id && !d.invoice_id && <span className="text-neutral-300 text-xs">—</span>}
+                          </div>
+                        </td>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-1">
+                            {isLocked ? (
+                              <span className="flex items-center gap-1 text-[10px] text-neutral-400 px-1.5 py-1">
+                                <Lock className="w-3 h-3" />
+                                {isDelivered ? 'Delivered' : 'Returned'}
+                              </span>
+                            ) : (
+                              <>
+                                <button onClick={() => openEdit(d)} title="Edit dispatch" className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500 hover:text-primary-600 transition-colors">
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                                <button onClick={() => markDelivered(d)} className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-success-50 text-success-700 hover:bg-success-100 transition-colors">
+                                  <CheckCircle className="w-3 h-3" /> Delivered
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

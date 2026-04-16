@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { useDateRange } from '../contexts/DateRangeContext';
 import { useAuth } from '../contexts/AuthContext';
+import SalesFlowBanner from '../components/ui/SalesFlowBanner';
 import type { ActivePage, Customer, Appointment } from '../types';
 import type { PageState } from '../App';
 
@@ -49,6 +50,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [monthRevenue, setMonthRevenue] = useState(0);
   const [monthCollected, setMonthCollected] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [totalChallans, setTotalChallans] = useState(0);
+  const [totalInvoices, setTotalInvoices] = useState(0);
 
   useEffect(() => { loadDashboardData(); }, [dateRange]);
 
@@ -61,7 +64,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
     const [
       followupRes, todayApptRes, dispatchRes, invoicesRes, recentRes,
-      lowStockRes, ordersRes, paymentsRes,
+      lowStockRes, ordersRes, paymentsRes, challansRes,
     ] = await Promise.all([
       supabase.from('customers').select('id, name, phone, next_followup_date, city').eq('next_followup_date', today).eq('is_active', true),
       supabase.from('appointments').select('*').gte('start_time', today).lte('start_time', today + 'T23:59:59').order('start_time'),
@@ -71,6 +74,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       supabase.from('products').select('name, stock_quantity, low_stock_alert').eq('is_active', true),
       supabase.from('sales_orders').select('id', { count: 'exact', head: true }).in('status', ['confirmed', 'draft']),
       supabase.from('payments').select('amount').gte('payment_date', fromDate).lte('payment_date', toDate).eq('payment_type', 'receipt'),
+      supabase.from('delivery_challans').select('id', { count: 'exact', head: true }).neq('status', 'cancelled'),
     ]);
 
     setFollowupsToday((followupRes.data || []) as Customer[]);
@@ -92,6 +96,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     setPendingOrders(ordersRes.count || 0);
     const collected = (paymentsRes.data || []).reduce((s: number, p: { amount: number }) => s + p.amount, 0);
     setMonthCollected(collected);
+    setTotalChallans(challansRes.count || 0);
+    setTotalInvoices(allInvoices.length);
 
     setLoading(false);
   };
@@ -235,6 +241,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             <p className="text-xs mt-1 text-neutral-400">Products need restocking</p>
           </button>
         </div>
+
+        {canAccessSales && (
+          <SalesFlowBanner
+            onNavigate={onNavigate}
+            counts={{
+              salesOrders: pendingOrders,
+              challans: totalChallans,
+              invoices: totalInvoices,
+              dispatches: pendingDispatches,
+              pendingPayment: pendingPayments,
+            }}
+          />
+        )}
 
         <div className="grid grid-cols-3 gap-5">
           <div className="col-span-2 space-y-5">
