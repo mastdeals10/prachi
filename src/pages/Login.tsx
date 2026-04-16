@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Star, Eye, EyeOff, User } from 'lucide-react';
-import { usernameToEmail } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 
 export default function Login() {
   const { signIn } = useAuth();
@@ -15,7 +15,13 @@ export default function Login() {
     setError('');
     if (!form.username.trim()) { setError('Username is required'); return; }
     setLoading(true);
-    const email = usernameToEmail(form.username.trim());
+    const username = form.username.trim();
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('email')
+      .ilike('display_name', username)
+      .maybeSingle();
+    const email = profile?.email ?? `${username.toLowerCase()}@prachifulagar.app`;
     const { error } = await signIn(email, form.password);
     if (error) setError('Invalid username or password');
     setLoading(false);
