@@ -581,6 +581,7 @@ export type ActivePage =
   | 'dashboard'
   | 'inventory'
   | 'godown-stock'
+  | 'godown-transfer'
   | 'purchase'
   | 'sales'
   | 'sales-orders'

@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import GodownStock from './pages/inventory/GodownStock';
+import GodownTransfer from './pages/inventory/GodownTransfer';
 import Purchase from './pages/Purchase';
 import SalesOrders from './pages/sales/SalesOrders';
 import Invoices from './pages/sales/Invoices';
@@ -40,6 +41,7 @@ const PAGE_TITLES: Partial<Record<ActivePage, string>> = {
   courier: 'Shipments',
   inventory: 'Products',
   'godown-stock': 'Godown Stock',
+  'godown-transfer': 'Stock Transfers',
   purchase: 'Purchases',
   finance: 'Finance',
   ledger: 'Ledger',
@@ -84,6 +86,7 @@ function AppShell() {
       case 'sales-returns': return canAccessSales ? <SalesReturns /> : <Dashboard onNavigate={navigate} />;
       case 'inventory': return canAccessInventory ? <Inventory /> : <Dashboard onNavigate={navigate} />;
       case 'godown-stock': return canAccessInventory ? <GodownStock /> : <Dashboard onNavigate={navigate} />;
+      case 'godown-transfer': return canAccessInventory ? <GodownTransfer /> : <Dashboard onNavigate={navigate} />;
       case 'purchase': return isAdmin ? <Purchase /> : <Dashboard onNavigate={navigate} />;
       case 'finance':
       case 'ledger': return canAccessFinance ? <Ledger /> : <Dashboard onNavigate={navigate} />;

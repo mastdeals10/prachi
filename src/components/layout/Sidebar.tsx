@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, FileText, BarChart2,
   Truck, BookOpen, Receipt, Zap, LogOut, Moon, RotateCcw,
   CalendarDays, CircleUser as UserCircle2, Settings,
-  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff
+  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -156,6 +156,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
                 {isAdmin && <NavItem id="purchase" label="Purchases" icon={ShoppingCart} />}
                 <NavItem id="inventory" label="Products" icon={Package} />
                 <NavItem id="godown-stock" label="Stock" icon={BarChart2} />
+                <NavItem id="godown-transfer" label="Transfers" icon={ArrowLeftRight} />
               </div>
             </>
           )}

@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
-import { reduceGodownStock } from './godownService';
 import { updateLastRate } from '../lib/rateCardService';
+import { postStockMovement } from './stockLedger';
 
 export async function onInvoiceCreated(invoiceId: string): Promise<{ errors: string[] }> {
   const errors: string[] = [];
@@ -13,31 +13,22 @@ export async function onInvoiceCreated(invoiceId: string): Promise<{ errors: str
 
   if (!invoice) return { errors: ['Invoice not found'] };
 
-  const godownId = invoice.godown_id;
-  if (godownId) {
-    for (const item of invoice.items || []) {
-      const result = await reduceGodownStock(item.product_id, godownId, item.quantity);
-      if (result.error) errors.push(`${item.product_name}: ${result.error}`);
-
-      await supabase.from('stock_movements').insert({
-        product_id: item.product_id,
-        movement_type: 'sale',
-        quantity: item.quantity,
-        reference_number: invoice.invoice_number,
+  for (const item of invoice.items || []) {
+    const itemGodownId = item.godown_id || invoice.godown_id;
+    if (!itemGodownId || !item.product_id) continue;
+    try {
+      await postStockMovement({
+        productId: item.product_id,
+        godownId: itemGodownId,
+        qtyChange: -item.quantity,
+        movementType: 'sale',
+        referenceType: 'invoice',
+        referenceId: invoice.id,
+        referenceNumber: invoice.invoice_number,
         notes: `Invoice ${invoice.invoice_number}`,
       });
-
-      const { data: prod } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', item.product_id)
-        .maybeSingle();
-      if (prod) {
-        await supabase.from('products').update({
-          stock_quantity: Math.max(0, prod.stock_quantity - item.quantity),
-          updated_at: new Date().toISOString(),
-        }).eq('id', item.product_id);
-      }
+    } catch (e) {
+      errors.push(`${item.product_name}: ${e instanceof Error ? e.message : 'stock posting failed'}`);
     }
   }
 

@@ -9,6 +9,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import ActionMenu, { actionView, actionEdit, actionDelete } from '../../components/ui/ActionMenu';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import type { SalesReturn, SalesReturnItem, Invoice, Product } from '../../types';
+import { postStockMovement } from '../../services/stockLedger';
 
 interface ReturnLineItem {
   product_id: string;
@@ -231,31 +232,6 @@ export default function SalesReturns() {
   };
 
   const handleApprove = async (ret: SalesReturn) => {
-    let retItems = rowItems[ret.id];
-    if (!retItems) {
-      const { data } = await supabase.from('sales_return_items').select('*').eq('sales_return_id', ret.id);
-      retItems = data || [];
-      setRowItems(prev => ({ ...prev, [ret.id]: retItems }));
-    }
-
-    for (const item of retItems) {
-      if (item.return_to_stock && item.product_id) {
-        const prod = products.find(p => p.id === item.product_id);
-        if (prod) {
-          const newQty = (prod.stock_quantity || 0) + item.quantity;
-          await supabase.from('products').update({ stock_quantity: newQty, updated_at: new Date().toISOString() }).eq('id', item.product_id);
-          await supabase.from('stock_movements').insert({
-            product_id: item.product_id,
-            movement_type: 'in',
-            quantity: item.quantity,
-            reference_type: 'sales_return',
-            reference_id: ret.id,
-            notes: 'Return ' + ret.return_number,
-          });
-        }
-      }
-    }
-
     await supabase.from('sales_returns').update({ status: 'approved' }).eq('id', ret.id);
     loadData();
   };
@@ -268,25 +244,24 @@ export default function SalesReturns() {
       setRowItems(prev => ({ ...prev, [ret.id]: retItems }));
     }
 
+    const { data: godownList } = await supabase.from('godowns').select('id').eq('is_active', true).order('name').limit(1);
+    const defaultGodownId = godownList && godownList.length > 0 ? godownList[0].id : null;
+
     for (const item of retItems) {
-      if (item.return_to_stock && item.product_id) {
-        const prod = products.find(p => p.id === item.product_id);
-        if (prod) {
-          const newQty = (prod.stock_quantity || 0) + item.quantity;
-          await supabase.from('products').update({ stock_quantity: newQty, updated_at: new Date().toISOString() }).eq('id', item.product_id);
-          await supabase.from('stock_movements').insert({
-            product_id: item.product_id,
-            movement_type: 'in',
-            quantity: item.quantity,
-            reference_type: 'sales_return',
-            reference_id: ret.id,
-            notes: 'Return ' + ret.return_number,
-          });
-        }
+      if (item.return_to_stock && item.product_id && defaultGodownId) {
+        await postStockMovement({
+          productId: item.product_id,
+          godownId: defaultGodownId,
+          qtyChange: item.quantity,
+          movementType: 'return',
+          referenceType: 'sales_return',
+          referenceId: ret.id,
+          referenceNumber: ret.return_number,
+          notes: 'Return ' + ret.return_number,
+        });
       }
     }
 
-    const inv = invoices.find(i => i.id === ret.invoice_id);
     await supabase.from('ledger_entries').insert({
       entry_date: ret.return_date,
       entry_type: 'credit',

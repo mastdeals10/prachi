@@ -46,7 +46,7 @@ export default function Inventory() {
     low_stock_enabled: true,
     company_id: '',
   });
-  const [stockForm, setStockForm] = useState({ type: 'adjustment', quantity: '', notes: '', movement_label: 'adjustment' });
+  const [stockForm, setStockForm] = useState({ type: 'adjustment', quantity: '', notes: '', movement_label: 'adjustment', godown_id: '' });
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
@@ -168,8 +168,11 @@ export default function Inventory() {
     if (editing) {
       const { stock_quantity: _sq, remaining_weight: _rw, ...editPayload } = payload;
       await supabase.from('products').update(editPayload).eq('id', editing.id);
-      for (const [godownId, qtyStr] of Object.entries(editGodownStocks)) {
-        const qty = parseFloat(qtyStr) || 0;
+      const godownStockEntries = Object.entries(editGodownStocks).map(([godownId, qtyStr]) => ({
+        godownId,
+        qty: parseFloat(qtyStr) || 0,
+      }));
+      for (const { godownId, qty } of godownStockEntries) {
         await supabase.from('godown_stock').upsert({
           product_id: editing.id,
           godown_id: godownId,
@@ -177,8 +180,16 @@ export default function Inventory() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'godown_id,product_id' });
       }
-      const totalStock = Object.values(editGodownStocks).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+      const totalStock = godownStockEntries.reduce((s, { qty }) => s + qty, 0);
       await supabase.from('products').update({ stock_quantity: totalStock }).eq('id', editing.id);
+      for (const { godownId, qty } of godownStockEntries) {
+        await supabase.from('godown_stock').upsert({
+          product_id: editing.id,
+          godown_id: godownId,
+          quantity: qty,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'godown_id,product_id' });
+      }
     } else {
       const { data: newProduct } = await supabase.from('products').insert(payload).select().maybeSingle();
       if (newProduct) {
@@ -214,7 +225,7 @@ export default function Inventory() {
 
   const openStockModal = (p: Product) => {
     setSelectedProduct(p);
-    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'in' });
+    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'in', godown_id: godowns[0]?.id || '' });
     setShowStockModal(true);
   };
 
@@ -230,14 +241,40 @@ export default function Inventory() {
     const qty = parseFloat(stockForm.quantity) || 0;
     const mvType = stockForm.movement_label;
     const isIn = ['in', 'purchase', 'return'].includes(mvType);
-    const newQty = isIn
-      ? selectedProduct.stock_quantity + qty
-      : mvType === 'adjustment' ? qty
-      : Math.max(0, selectedProduct.stock_quantity - qty);
+    const godownId = stockForm.godown_id;
 
-    const updates: Record<string, unknown> = { stock_quantity: newQty, updated_at: new Date().toISOString() };
+    const { data: snapshotRows } = await supabase
+      .from('godown_stock')
+      .select('godown_id, quantity')
+      .eq('product_id', selectedProduct.id);
+    const snapshot: Record<string, number> = {};
+    for (const row of snapshotRows || []) {
+      snapshot[row.godown_id] = row.quantity || 0;
+    }
+
+    if (godownId) {
+      const currentGodownQty = snapshot[godownId] || 0;
+      let newGodownQty: number;
+      if (mvType === 'adjustment') {
+        newGodownQty = qty;
+      } else if (isIn) {
+        newGodownQty = currentGodownQty + qty;
+      } else {
+        newGodownQty = Math.max(0, currentGodownQty - qty);
+      }
+      snapshot[godownId] = newGodownQty;
+      await supabase.from('godown_stock').upsert({
+        product_id: selectedProduct.id,
+        godown_id: godownId,
+        quantity: newGodownQty,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'godown_id,product_id' });
+    }
+
+    const newTotalQty = Object.values(snapshot).reduce((s, q) => s + q, 0);
+    const updates: Record<string, unknown> = { stock_quantity: newTotalQty, updated_at: new Date().toISOString() };
     if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
-      const weightAmt = parseFloat(stockForm.quantity) || 0;
+      const weightAmt = qty;
       if (isIn) {
         updates.remaining_weight = (selectedProduct.remaining_weight || 0) + weightAmt;
         updates.total_weight = (selectedProduct.total_weight || 0) + (mvType === 'purchase' ? weightAmt : 0);
@@ -246,10 +283,21 @@ export default function Inventory() {
       }
     }
     await supabase.from('products').update(updates).eq('id', selectedProduct.id);
+
+    for (const [gId, gQty] of Object.entries(snapshot)) {
+      await supabase.from('godown_stock').upsert({
+        product_id: selectedProduct.id,
+        godown_id: gId,
+        quantity: gQty,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'godown_id,product_id' });
+    }
+
     await supabase.from('stock_movements').insert({
       product_id: selectedProduct.id,
       movement_type: mvType,
       quantity: qty,
+      godown_id: godownId || null,
       notes: stockForm.notes,
     });
     setShowStockModal(false);
@@ -621,6 +669,14 @@ export default function Inventory() {
         }
       >
         <div className="space-y-3">
+          {godowns.length > 1 && (
+            <div>
+              <label className="label">Godown</label>
+              <select value={stockForm.godown_id} onChange={e => setStockForm(f => ({ ...f, godown_id: e.target.value }))} className="input text-xs">
+                {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="label">Movement Type</label>
             <div className="grid grid-cols-2 gap-1.5">
@@ -647,7 +703,7 @@ export default function Inventory() {
           </div>
           {selectedProduct && (
             <div className="bg-neutral-50 px-3 py-2 rounded-lg">
-              <p className="text-xs text-neutral-500">Current stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.unit}</strong></p>
+              <p className="text-xs text-neutral-500">Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.unit}</strong></p>
             </div>
           )}
         </div>

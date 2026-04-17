@@ -18,6 +18,7 @@ const emptyForm: GodownFormData = { name: '', location: '', manager_name: '', ph
 
 interface AdjustState {
   stockId: string;
+  productId: string;
   productName: string;
   currentQty: number;
   newQty: string;
@@ -66,22 +67,19 @@ export default function Godowns() {
   };
 
   const handleSyncStock = async () => {
-    if (!selectedGodown) return;
     setSyncing(true);
-    const { data: products } = await supabase
-      .from('products')
-      .select('id, stock_quantity')
-      .eq('is_active', true);
-
-    if (products && products.length > 0) {
-      const upserts = products.map((p: { id: string; stock_quantity: number }) => ({
-        godown_id: selectedGodown.id,
-        product_id: p.id,
-        quantity: p.stock_quantity,
-      }));
-      await supabase.from('godown_stock').upsert(upserts, { onConflict: 'godown_id,product_id' });
+    const { data: allGodownRows } = await supabase
+      .from('godown_stock').select('product_id, quantity');
+    if (allGodownRows && allGodownRows.length > 0) {
+      const totals: Record<string, number> = {};
+      for (const row of allGodownRows) {
+        totals[row.product_id] = (totals[row.product_id] || 0) + (row.quantity || 0);
+      }
+      for (const [productId, total] of Object.entries(totals)) {
+        await supabase.from('products').update({ stock_quantity: total }).eq('id', productId);
+      }
     }
-    await loadGodownStock(selectedGodown.id);
+    if (selectedGodown) await loadGodownStock(selectedGodown.id);
     setSyncing(false);
   };
 
@@ -111,10 +109,7 @@ export default function Godowns() {
     if (editing) {
       await supabase.from('godowns').update(payload).eq('id', editing.id);
     } else {
-      const { data } = await supabase.from('godowns').insert({ ...payload, is_active: true }).select().maybeSingle();
-      if (data) {
-        await handleSyncStock();
-      }
+      await supabase.from('godowns').insert({ ...payload, is_active: true });
     }
     setSaving(false);
     setShowModal(false);
@@ -136,6 +131,10 @@ export default function Godowns() {
     if (isNaN(qty) || qty < 0) return;
     setAdjustSaving(true);
     await supabase.from('godown_stock').update({ quantity: qty, updated_at: new Date().toISOString() }).eq('id', adjusting.stockId);
+    const { data: allRows } = await supabase
+      .from('godown_stock').select('quantity').eq('product_id', adjusting.productId);
+    const newTotal = (allRows || []).reduce((s, r) => s + (r.quantity || 0), 0);
+    await supabase.from('products').update({ stock_quantity: newTotal }).eq('id', adjusting.productId);
     setAdjusting(null);
     setAdjustSaving(false);
     if (selectedGodown) await loadGodownStock(selectedGodown.id);
@@ -380,7 +379,7 @@ export default function Godowns() {
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => setAdjusting({ stockId: s.id, productName: product?.name || '', currentQty: s.quantity, newQty: String(s.quantity) })}
+                                    onClick={() => setAdjusting({ stockId: s.id, productId: s.product_id, productName: product?.name || '', currentQty: s.quantity, newQty: String(s.quantity) })}
                                     className="text-[10px] px-2 py-0.5 rounded border border-neutral-200 text-neutral-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                                     Edit
                                   </button>

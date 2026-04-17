@@ -284,7 +284,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const openNew = () => {
     setEditChallan(null);
     setForm(emptyForm);
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
     setSoSelectSearch('');
     setShowSOSelectModal(true);
   };
@@ -293,7 +293,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     setShowSOSelectModal(false);
     setEditChallan(null);
     setForm(emptyForm);
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
     await handleSOChange(soId);
     setShowModal(true);
   };
@@ -302,7 +302,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     setShowSOSelectModal(false);
     setEditChallan(null);
     setForm(emptyForm);
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
     setShowModal(true);
   };
 

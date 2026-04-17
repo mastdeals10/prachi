@@ -18,6 +18,7 @@ const emptyForm: GodownFormData = { name: '', location: '', manager_name: '', ph
 
 interface AdjustState {
   stockId: string;
+  productId: string;
   productName: string;
   currentQty: number;
   newQty: string;
@@ -112,6 +113,10 @@ export default function GodownsTab() {
     if (isNaN(qty) || qty < 0) return;
     setAdjustSaving(true);
     await supabase.from('godown_stock').update({ quantity: qty, updated_at: new Date().toISOString() }).eq('id', adjusting.stockId);
+    const { data: allRows } = await supabase
+      .from('godown_stock').select('quantity').eq('product_id', adjusting.productId);
+    const newTotal = (allRows || []).reduce((s, r) => s + (r.quantity || 0), 0);
+    await supabase.from('products').update({ stock_quantity: newTotal }).eq('id', adjusting.productId);
     setAdjusting(null);
     setAdjustSaving(false);
     if (selectedGodown) await loadGodownStock(selectedGodown.id);
@@ -347,7 +352,7 @@ export default function GodownsTab() {
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => setAdjusting({ stockId: s.id, productName: product?.name || '', currentQty: s.quantity, newQty: String(s.quantity) })}
+                                    onClick={() => setAdjusting({ stockId: s.id, productId: s.product_id, productName: product?.name || '', currentQty: s.quantity, newQty: String(s.quantity) })}
                                     className="text-[10px] px-2 py-0.5 rounded border border-neutral-200 text-neutral-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                                     Edit
                                   </button>

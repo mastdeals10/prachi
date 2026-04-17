@@ -7,6 +7,7 @@ import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import { useDateRange } from '../../contexts/DateRangeContext';
+import { postStockMovement } from '../../services/stockLedger';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
 import { fetchCompanies } from '../../lib/companiesService';
@@ -196,6 +197,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const total = subtotal + (parseFloat(form.courier_charges) || 0) - (parseFloat(form.discount_amount) || 0);
 
   const handleSave = async () => {
+    const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
+    const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
+    if (missingGodown.length > 0) {
+      alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      return;
+    }
     const soNumber = await nextDocNumber('SO', supabase);
     const firstProdId = items.find(i => i.product_id)?.product_id;
     const firstProd = firstProdId ? products.find(p => p.id === firstProdId) : null;
@@ -244,6 +251,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const handleEdit = async () => {
     if (!editOrder) return;
+    const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
+    const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
+    if (missingGodown.length > 0) {
+      alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      return;
+    }
     await supabase.from('sales_orders').update({
       customer_id: form.customer_id || null,
       customer_name: form.customer_name,
@@ -445,22 +458,28 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           }))
         );
 
+        const missing = soItems.filter(it => it.product_id && !((it as any).godown_id || order.godown_id));
+        if (missing.length > 0) {
+          throw new Error(
+            `Cannot create invoice: godown is missing on ${missing.length} line(s). ` +
+            `Edit the Sales Order and assign a godown to every product before converting.`
+          );
+        }
+
         for (const item of soItems) {
-          if (item.product_id) {
-            const prod = products.find(p => p.id === item.product_id);
-            if (prod) {
-              const newQty = Math.max(0, (prod.stock_quantity || 0) - item.quantity);
-              await supabase.from('products').update({ stock_quantity: newQty, updated_at: new Date().toISOString() }).eq('id', item.product_id);
-              await supabase.from('stock_movements').insert({
-                product_id: item.product_id,
-                movement_type: 'out',
-                quantity: item.quantity,
-                reference_type: 'invoice',
-                reference_id: inv.id,
-                notes: `Invoice ${inv.invoice_number} for ${order.customer_name}`,
-              });
-            }
-          }
+          if (!item.product_id) continue;
+          const godownId = (item as any).godown_id || order.godown_id;
+          if (!godownId) continue;
+          await postStockMovement({
+            productId: item.product_id,
+            godownId,
+            qtyChange: -item.quantity,
+            movementType: 'sale',
+            referenceType: 'invoice',
+            referenceId: inv.id,
+            referenceNumber: inv.invoice_number,
+            notes: `Invoice ${inv.invoice_number} for ${order.customer_name}`,
+          });
         }
 
         if (order.customer_id) {
@@ -477,6 +496,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         await supabase.from('sales_orders').update({ status: 'invoiced' }).eq('id', order.id);
         onNavigate('invoices');
       }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to convert Sales Order to Invoice');
     } finally {
       setConverting(null);
     }
@@ -567,7 +588,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             setEditOrder(null);
             setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '' });
             setGodownStockMap({});
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0 }]);
+            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
             setShowModal(true);
           }} className="btn-primary">
             <Plus className="w-4 h-4" /> New Order

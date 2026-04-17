@@ -8,6 +8,7 @@ import StatusBadge from '../components/ui/StatusBadge';
 import EmptyState from '../components/ui/EmptyState';
 import ActionMenu, { actionEdit, actionDelete } from '../components/ui/ActionMenu';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { postStockMovement } from '../services/stockLedger';
 import { useDateRange } from '../contexts/DateRangeContext';
 import type { PurchaseEntry, Product, Supplier, Godown } from '../types';
 
@@ -173,38 +174,22 @@ export default function Purchase() {
 
         for (const item of items.filter(i => i.product_id)) {
           const qty = parseFloat(item.quantity) || 0;
-          await supabase.from('stock_movements').insert({
-            product_id: item.product_id,
-            movement_type: 'purchase',
-            quantity: qty,
-            reference_type: 'purchase_entry',
-            reference_id: entry.id,
-            godown_id: form.godown_id || null,
-            notes: 'Purchase ' + entryNumber,
-          });
-
           if (form.godown_id) {
-            const { data: existing } = await supabase
-              .from('godown_stock')
-              .select('quantity')
-              .eq('product_id', item.product_id)
-              .eq('godown_id', form.godown_id)
-              .maybeSingle();
-            const currentQty = existing?.quantity || 0;
-            await supabase.from('godown_stock').upsert({
-              product_id: item.product_id,
-              godown_id: form.godown_id,
-              quantity: currentQty + qty,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'godown_id,product_id' });
+            await postStockMovement({
+              productId: item.product_id,
+              godownId: form.godown_id,
+              qtyChange: qty,
+              movementType: 'purchase',
+              referenceType: 'purchase_entry',
+              referenceId: entry.id,
+              referenceNumber: entryNumber,
+              notes: 'Purchase ' + entryNumber,
+            });
           }
-
           const prod = products.find(p => p.id === item.product_id);
-          if (prod) {
-            const newQty = prod.stock_quantity + qty;
+          if (parseFloat(item.unit_price) || prod?.purchase_price) {
             await supabase.from('products').update({
-              stock_quantity: newQty,
-              purchase_price: parseFloat(item.unit_price) || prod.purchase_price,
+              purchase_price: parseFloat(item.unit_price) || (prod?.purchase_price ?? 0),
               updated_at: new Date().toISOString(),
             }).eq('id', item.product_id);
           }
