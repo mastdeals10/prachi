@@ -183,7 +183,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       setShowModal(true);
     };
     loadAndPrefill();
-  }, [prefillFromDC]);
+  }, [prefillFromDC, godowns]);
 
   const [soMap, setSoMap] = useState<Record<string, string>>({});
   const [dcMap, setDcMap] = useState<Record<string, string>>({});
