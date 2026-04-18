@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight, XCircle, X } from 'lucide-react';
+import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
@@ -123,7 +124,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const loadData = async () => {
     const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
     ]);
@@ -348,12 +349,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert('Please select a customer.');
       return;
     }
-    if (form.is_b2b && form.ship_to_mode === 'customer' && !form.ship_to_customer_id) {
-      alert('B2B orders require a Ship To customer.');
-      return;
-    }
-    if (form.is_b2b && form.ship_to_mode === 'manual' && !form.ship_to_name.trim()) {
-      alert('Please enter a Ship To name for manual delivery address.');
+    if (form.is_b2b && !form.ship_to_name.trim()) {
+      alert('Please enter a Ship To recipient name.');
       return;
     }
     try {
@@ -413,12 +410,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
       return;
     }
-    if (form.is_b2b && form.ship_to_mode === 'customer' && !form.ship_to_customer_id) {
-      alert('B2B orders require a Ship To customer.');
-      return;
-    }
-    if (form.is_b2b && form.ship_to_mode === 'manual' && !form.ship_to_name.trim()) {
-      alert('Please enter a Ship To name for manual delivery address.');
+    if (form.is_b2b && !form.ship_to_name.trim()) {
+      alert('Please enter a Ship To recipient name.');
       return;
     }
     try {
@@ -923,7 +916,10 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs w-full" placeholder="Address Line 2" />
                 <div className="grid grid-cols-3 gap-1">
                   <input value={form.ship_to_city} onChange={e => setForm(f => ({ ...f, ship_to_city: e.target.value }))} className="input text-xs" placeholder="City" />
-                  <input value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs" placeholder="State" />
+                  <select value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs">
+                    <option value="">State</option>
+                    {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                   <input value={form.ship_to_pin} onChange={e => setForm(f => ({ ...f, ship_to_pin: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
                 </div>
                 <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs w-full" placeholder="Phone" />
@@ -961,7 +957,10 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 </div>
                 <div>
                   <label className="label">State</label>
-                  <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs" placeholder="State" />
+                  <select value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs">
+                    <option value="">-- State --</option>
+                    {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="label">PIN</label>
