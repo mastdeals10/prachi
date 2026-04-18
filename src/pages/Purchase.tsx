@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse } from 'lucide-react';
+import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,6 +11,25 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { processStockMovement } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
 import type { PurchaseEntry, Product, Supplier, Godown } from '../types';
+
+type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed';
+
+const DELIVERY_STATUS_COLORS: Record<DeliveryStatus, string> = {
+  'Pending': 'bg-neutral-100 text-neutral-600',
+  'In Transit': 'bg-blue-100 text-blue-700',
+  'Delivered': 'bg-success-100 text-success-700',
+  'Delayed': 'bg-error-100 text-error-700',
+};
+
+function computeDeliveryStatus(entry: PurchaseEntry): DeliveryStatus {
+  const status = (entry.delivery_status || 'Pending') as DeliveryStatus;
+  if (status === 'Delivered') return 'Delivered';
+  if (entry.expected_delivery_date) {
+    const today = new Date().toISOString().split('T')[0];
+    if (today > entry.expected_delivery_date) return 'Delayed';
+  }
+  return status;
+}
 
 interface LineItem {
   product_id: string;
@@ -45,6 +64,9 @@ export default function Purchase() {
     supplier_id: '', supplier_name: '',
     entry_date: new Date().toISOString().split('T')[0],
     invoice_number: '', notes: '', godown_id: '',
+    expected_delivery_date: '',
+    delivery_status: 'Pending' as DeliveryStatus,
+    received_qty: '0',
   });
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
 
@@ -63,7 +85,7 @@ export default function Purchase() {
     ]);
     setEntries(entriesRes.data || []);
     setSuppliers(suppliersRes.data || []);
-    setProducts(productsRes.data || []);
+    setProducts((productsRes.data || []) as any);
     setGodowns(godownsRes.data || []);
   };
 
@@ -94,7 +116,7 @@ export default function Purchase() {
 
   const openNewEntry = () => {
     setEditingEntry(null);
-    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '' });
+    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '', expected_delivery_date: '', delivery_status: 'Pending', received_qty: '0' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
     setShowModal(true);
   };
@@ -108,6 +130,9 @@ export default function Purchase() {
       invoice_number: entry.invoice_number || '',
       notes: entry.notes || '',
       godown_id: '',
+      expected_delivery_date: entry.expected_delivery_date || '',
+      delivery_status: (entry.delivery_status as DeliveryStatus) || 'Pending',
+      received_qty: String(entry.received_qty ?? 0),
     });
     const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id);
     const loaded = (data || []).map((item: any) => ({
@@ -123,7 +148,13 @@ export default function Purchase() {
   };
 
   const handleSave = async () => {
+    const orderedQty = items.filter(i => i.product_name).reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+    const receivedQty = parseFloat(form.received_qty) || 0;
+    let deliveryStatus: DeliveryStatus = form.delivery_status;
+    if (receivedQty > 0 && receivedQty >= orderedQty) deliveryStatus = 'Delivered';
+
     if (editingEntry) {
+      const prevStatus = editingEntry.delivery_status;
       await supabase.from('purchase_entries').update({
         supplier_id: form.supplier_id || null,
         supplier_name: form.supplier_name,
@@ -132,8 +163,33 @@ export default function Purchase() {
         subtotal, tax_amount: 0, total_amount: subtotal,
         outstanding_amount: subtotal,
         notes: form.notes,
+        expected_delivery_date: form.expected_delivery_date || null,
+        delivery_status: deliveryStatus,
+        received_qty: receivedQty,
         updated_at: new Date().toISOString(),
       }).eq('id', editingEntry.id);
+
+      if (deliveryStatus === 'Delivered' && prevStatus !== 'Delivered' && form.godown_id) {
+        const stockItems = items
+          .filter(i => i.product_id)
+          .map(i => ({
+            product_id: i.product_id,
+            godown_id: form.godown_id,
+            quantity: parseFloat(i.quantity) || 0,
+            unit_price: parseFloat(i.unit_price) || 0,
+          }))
+          .filter(i => i.quantity > 0);
+        if (stockItems.length > 0) {
+          await processStockMovement({
+            type: 'purchase',
+            items: stockItems,
+            reference_type: 'purchase_entry',
+            reference_id: editingEntry.id,
+            reference_number: editingEntry.entry_number,
+            notes: 'Delivered ' + editingEntry.entry_number,
+          });
+        }
+      }
 
       await supabase.from('purchase_entry_items').delete().eq('purchase_entry_id', editingEntry.id);
       const updatedItems = items.filter(i => i.product_name).map(i => ({
@@ -158,6 +214,9 @@ export default function Purchase() {
         subtotal, tax_amount: 0, total_amount: subtotal,
         paid_amount: 0, outstanding_amount: subtotal,
         status: 'unpaid', notes: form.notes,
+        expected_delivery_date: form.expected_delivery_date || null,
+        delivery_status: deliveryStatus,
+        received_qty: receivedQty,
       }).select().single();
 
       if (entry) {
@@ -257,7 +316,7 @@ export default function Purchase() {
       state: s.state || '',
       pincode: s.pincode || '',
       gstin: s.gstin || '',
-      notes: s.notes || '',
+      notes: (s as any).notes || '',
       opening_balance: String(s.opening_balance ?? 0),
     });
     setShowSupplierModal(true);
@@ -290,6 +349,14 @@ export default function Purchase() {
         await supabase.from('suppliers').update({ balance: Math.max(0, (sup.balance || 0) - entry.total_amount) }).eq('id', entry.supplier_id);
       }
     }
+    loadData();
+  };
+
+  const updateDeliveryStatus = async (entry: PurchaseEntry, newStatus: DeliveryStatus) => {
+    await supabase.from('purchase_entries').update({
+      delivery_status: newStatus,
+      updated_at: new Date().toISOString(),
+    }).eq('id', entry.id);
     loadData();
   };
 
@@ -413,15 +480,18 @@ export default function Purchase() {
                   <th className="table-header text-left">Entry #</th>
                   <th className="table-header text-left">Supplier</th>
                   <th className="table-header text-left">Date</th>
-                  <th className="table-header text-left">Invoice #</th>
+                  <th className="table-header text-left">Exp. Delivery</th>
                   <th className="table-header text-right">Amount</th>
                   <th className="table-header text-right">Outstanding</th>
-                  <th className="table-header text-left">Status</th>
+                  <th className="table-header text-left">Payment</th>
+                  <th className="table-header text-left">Delivery</th>
                   <th className="table-header text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(e => (
+                {filtered.map(e => {
+                  const ds = computeDeliveryStatus(e);
+                  return (
                   <>
                     <tr key={e.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
                       <td className="table-cell">
@@ -432,7 +502,13 @@ export default function Purchase() {
                       <td className="table-cell font-medium text-primary-700 text-xs">{e.entry_number}</td>
                       <td className="table-cell font-medium">{e.supplier_name}</td>
                       <td className="table-cell text-neutral-500 text-sm">{formatDate(e.entry_date)}</td>
-                      <td className="table-cell text-neutral-500 text-xs">{e.invoice_number || '-'}</td>
+                      <td className="table-cell text-sm">
+                        {e.expected_delivery_date ? (
+                          <span className={ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-600'}>
+                            {formatDate(e.expected_delivery_date)}
+                          </span>
+                        ) : <span className="text-neutral-300">-</span>}
+                      </td>
                       <td className="table-cell text-right font-semibold">{formatCurrency(e.total_amount)}</td>
                       <td className="table-cell text-right text-sm">
                         {e.outstanding_amount > 0 ? (
@@ -440,13 +516,30 @@ export default function Purchase() {
                         ) : <span className="text-success-600">Paid</span>}
                       </td>
                       <td className="table-cell"><StatusBadge status={e.status} /></td>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`badge text-[10px] ${DELIVERY_STATUS_COLORS[ds]}`}>{ds}</span>
+                          {ds !== 'Delivered' && (
+                            <select
+                              value={e.delivery_status}
+                              onChange={ev => updateDeliveryStatus(e, ev.target.value as DeliveryStatus)}
+                              className="text-[10px] border border-neutral-200 rounded px-1 py-0.5 bg-white text-neutral-600 cursor-pointer"
+                              onClick={ev => ev.stopPropagation()}
+                            >
+                              <option value="Pending">Pending</option>
+                              <option value="In Transit">In Transit</option>
+                              <option value="Delivered">Delivered</option>
+                            </select>
+                          )}
+                        </div>
+                      </td>
                       <td className="table-cell text-right">
                         <div className="flex items-center justify-end gap-2">
                           {e.status === 'unpaid' && (
                             <button onClick={() => markPaid(e)} className="text-xs text-primary-600 hover:underline font-medium">Mark Paid</button>
                           )}
                           <ActionMenu items={[
-                            ...(e.status === 'unpaid' ? [actionEdit(() => openEditEntry(e))] : []),
+                            actionEdit(() => openEditEntry(e)),
                             actionDelete(() => setConfirmEntry(e)),
                           ]} />
                         </div>
@@ -454,7 +547,7 @@ export default function Purchase() {
                     </tr>
                     {expandedEntry === e.id && entryItems[e.id] && (
                       <tr key={`${e.id}-items`}>
-                        <td colSpan={9} className="bg-orange-50 px-8 py-3 border-b border-orange-100">
+                        <td colSpan={10} className="bg-orange-50 px-8 py-3 border-b border-orange-100">
                           <table className="w-full">
                             <thead>
                               <tr className="text-[10px] text-neutral-500 uppercase tracking-wider">
@@ -479,7 +572,8 @@ export default function Purchase() {
                       </tr>
                     )}
                   </>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {filtered.length === 0 && <EmptyState icon={FileText} title="No purchases yet" description="Create your first purchase entry." />}
@@ -565,6 +659,25 @@ export default function Purchase() {
             <div>
               <label className="label">Supplier Invoice #</label>
               <input value={form.invoice_number} onChange={e => setForm(f => ({ ...f, invoice_number: e.target.value }))} className="input" placeholder="Optional" />
+            </div>
+            <div>
+              <label className="label flex items-center gap-1.5">
+                <Truck className="w-3.5 h-3.5 text-neutral-400" /> Expected Delivery Date
+              </label>
+              <input type="date" value={form.expected_delivery_date} onChange={e => setForm(f => ({ ...f, expected_delivery_date: e.target.value }))} className="input" />
+            </div>
+            <div>
+              <label className="label">Delivery Status</label>
+              <select value={form.delivery_status} onChange={e => setForm(f => ({ ...f, delivery_status: e.target.value as DeliveryStatus }))} className="input">
+                <option value="Pending">Pending</option>
+                <option value="In Transit">In Transit</option>
+                <option value="Delivered">Delivered</option>
+                <option value="Delayed">Delayed</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Received Qty (total)</label>
+              <input type="number" min="0" value={form.received_qty} onChange={e => setForm(f => ({ ...f, received_qty: e.target.value }))} className="input" placeholder="0" />
             </div>
             <div>
               <label className="label">Notes</label>

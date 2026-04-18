@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  Bell, Package, AlertTriangle, ArrowRight, Clock, TrendingUp, Truck, FileText,
-  CheckCircle, Users, Send, Receipt, BarChart2, CalendarDays, ShoppingCart, Zap,
+  Bell, Package, AlertTriangle, ArrowRight, TrendingUp, Truck, FileText,
+  Users, Send, Receipt, BarChart2, CalendarDays, ShoppingCart, Zap,
   IndianRupee, AlertCircle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -52,6 +52,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [loading, setLoading] = useState(true);
   const [totalChallans, setTotalChallans] = useState(0);
   const [totalInvoices, setTotalInvoices] = useState(0);
+  const [upcomingDeliveries, setUpcomingDeliveries] = useState<{ id: string; entry_number: string; supplier_name: string; expected_delivery_date: string; delivery_status: string }[]>([]);
 
   useEffect(() => { loadDashboardData(); }, [dateRange]);
 
@@ -62,9 +63,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     const today = toLocalDateStr(new Date());
     const { from: fromDate, to: toDate } = dateRange;
 
+    const futureDate = toLocalDateStr(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
     const [
       followupRes, todayApptRes, dispatchRes, invoicesRes, recentRes,
-      lowStockRes, ordersRes, paymentsRes, challansRes,
+      lowStockRes, ordersRes, paymentsRes, challansRes, deliveriesRes,
     ] = await Promise.all([
       supabase.from('customers').select('id, name, phone, next_followup_date, city').eq('next_followup_date', today).eq('is_active', true),
       supabase.from('appointments').select('*').gte('start_time', today).lte('start_time', today + 'T23:59:59').order('start_time'),
@@ -75,6 +77,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       supabase.from('sales_orders').select('id', { count: 'exact', head: true }).in('status', ['confirmed', 'draft']),
       supabase.from('payments').select('amount').gte('payment_date', fromDate).lte('payment_date', toDate).eq('payment_type', 'receipt'),
       supabase.from('delivery_challans').select('id', { count: 'exact', head: true }).neq('status', 'cancelled'),
+      supabase.from('purchase_entries')
+        .select('id, entry_number, supplier_name, expected_delivery_date, delivery_status')
+        .neq('delivery_status', 'Delivered')
+        .not('expected_delivery_date', 'is', null)
+        .lte('expected_delivery_date', futureDate)
+        .order('expected_delivery_date', { ascending: true })
+        .limit(6),
     ]);
 
     setFollowupsToday((followupRes.data || []) as Customer[]);
@@ -98,6 +107,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     setMonthCollected(collected);
     setTotalChallans(challansRes.count || 0);
     setTotalInvoices(allInvoices.length);
+    setUpcomingDeliveries(deliveriesRes.data || []);
 
     setLoading(false);
   };
@@ -433,6 +443,41 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {upcomingDeliveries.length > 0 && isAdmin && (
+              <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5" /> Upcoming Deliveries
+                  </p>
+                  <button onClick={() => onNavigate('purchase')} className="text-xs text-primary-600 hover:underline">View All</button>
+                </div>
+                <div className="space-y-2">
+                  {upcomingDeliveries.map(d => {
+                    const today = toLocalDateStr(new Date());
+                    const isDelayed = today > d.expected_delivery_date && d.delivery_status !== 'Delivered';
+                    const isToday = d.expected_delivery_date === today;
+                    return (
+                      <div key={d.id} className={`flex items-center gap-2 p-2 rounded-lg border ${isDelayed ? 'bg-error-50 border-error-200' : isToday ? 'bg-warning-50 border-warning-200' : 'bg-neutral-50 border-neutral-100'}`}>
+                        <Truck className={`w-3.5 h-3.5 shrink-0 ${isDelayed ? 'text-error-600' : isToday ? 'text-warning-600' : 'text-blue-500'}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-neutral-800 truncate">{d.entry_number}</p>
+                          <p className="text-[10px] text-neutral-500 truncate">{d.supplier_name}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-[10px] font-medium ${isDelayed ? 'text-error-700' : isToday ? 'text-warning-700' : 'text-neutral-600'}`}>
+                            {formatDate(d.expected_delivery_date)}
+                          </p>
+                          <p className={`text-[9px] ${isDelayed ? 'text-error-600' : isToday ? 'text-warning-600' : 'text-blue-600'}`}>
+                            {isDelayed ? 'Delayed' : isToday ? 'Today' : d.delivery_status}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

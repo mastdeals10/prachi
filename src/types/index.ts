@@ -109,10 +109,51 @@ export interface PurchaseEntry {
   total_amount: number;
   paid_amount: number;
   outstanding_amount: number;
-  status: 'unpaid' | 'partial' | 'paid';
+  status: 'unpaid' | 'partial' | 'paid' | 'cancelled';
+  expected_delivery_date?: string;
+  delivery_status: 'Pending' | 'In Transit' | 'Delivered' | 'Delayed';
+  received_qty: number;
   notes?: string;
   items?: PurchaseEntryItem[];
   created_at: string;
+}
+
+export interface DropShipment {
+  id: string;
+  ds_number: string;
+  supplier_id?: string;
+  supplier_name: string;
+  customer_id?: string;
+  customer_name: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_city?: string;
+  customer_state?: string;
+  customer_pincode?: string;
+  ds_date: string;
+  expected_delivery_date?: string;
+  status: 'draft' | 'confirmed' | 'supplier_dispatched' | 'delivered' | 'invoiced' | 'cancelled';
+  supplier_invoice_number?: string;
+  tracking_number?: string;
+  courier_company?: string;
+  subtotal: number;
+  tax_amount: number;
+  total_amount: number;
+  notes?: string;
+  company_id?: string;
+  items?: DropShipmentItem[];
+  created_at: string;
+}
+
+export interface DropShipmentItem {
+  id: string;
+  drop_shipment_id: string;
+  product_id?: string;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
 }
 
 export interface PurchaseEntryItem {
@@ -597,4 +638,5 @@ export type ActivePage =
   | 'reports'
   | 'courier'
   | 'automation'
-  | 'settings';
+  | 'settings'
+  | 'drop-shipments';
