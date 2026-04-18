@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
-import StatusBadge from '../components/ui/StatusBadge';
 import EmptyState from '../components/ui/EmptyState';
 import ActionMenu, { actionEdit, actionDelete } from '../components/ui/ActionMenu';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -40,6 +39,14 @@ interface LineItem {
   total_price: number;
 }
 
+interface ReceiveItem {
+  product_id: string;
+  product_name: string;
+  unit: string;
+  ordered_qty: number;
+  received_qty: string;
+}
+
 type Tab = 'entries' | 'suppliers';
 
 export default function Purchase() {
@@ -53,6 +60,10 @@ export default function Purchase() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [receivingEntry, setReceivingEntry] = useState<PurchaseEntry | null>(null);
+  const [receiveItems, setReceiveItems] = useState<ReceiveItem[]>([]);
+  const [receiveGodownId, setReceiveGodownId] = useState('');
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
   const [entryItems, setEntryItems] = useState<Record<string, any[]>>({});
   const [editingEntry, setEditingEntry] = useState<PurchaseEntry | null>(null);
@@ -65,8 +76,6 @@ export default function Purchase() {
     entry_date: new Date().toISOString().split('T')[0],
     invoice_number: '', notes: '', godown_id: '',
     expected_delivery_date: '',
-    delivery_status: 'Pending' as DeliveryStatus,
-    received_qty: '0',
   });
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
 
@@ -116,7 +125,7 @@ export default function Purchase() {
 
   const openNewEntry = () => {
     setEditingEntry(null);
-    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '', expected_delivery_date: '', delivery_status: 'Pending', received_qty: '0' });
+    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '', expected_delivery_date: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
     setShowModal(true);
   };
@@ -131,8 +140,6 @@ export default function Purchase() {
       notes: entry.notes || '',
       godown_id: '',
       expected_delivery_date: entry.expected_delivery_date || '',
-      delivery_status: (entry.delivery_status as DeliveryStatus) || 'Pending',
-      received_qty: String(entry.received_qty ?? 0),
     });
     const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id);
     const loaded = (data || []).map((item: any) => ({
@@ -147,14 +154,89 @@ export default function Purchase() {
     setShowModal(true);
   };
 
-  const handleSave = async () => {
-    const orderedQty = items.filter(i => i.product_name).reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
-    const receivedQty = parseFloat(form.received_qty) || 0;
-    let deliveryStatus: DeliveryStatus = form.delivery_status;
-    if (receivedQty > 0 && receivedQty >= orderedQty) deliveryStatus = 'Delivered';
+  const openReceiveGoods = async (entry: PurchaseEntry) => {
+    const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id);
+    const loaded = (data || []).map((item: any) => ({
+      product_id: item.product_id || '',
+      product_name: item.product_name,
+      unit: item.unit,
+      ordered_qty: parseFloat(item.quantity) || 0,
+      received_qty: String(parseFloat(item.quantity) || 0),
+    }));
+    setReceiveItems(loaded.length ? loaded : []);
+    setReceivingEntry(entry);
+    setReceiveGodownId(godowns[0]?.id || '');
+    setShowReceiveModal(true);
+  };
 
+  const handleConfirmReceive = async () => {
+    if (!receivingEntry) return;
+
+    const totalOrdered = receiveItems.reduce((s, i) => s + i.ordered_qty, 0);
+    const totalReceived = receiveItems.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0);
+    const newStatus: DeliveryStatus = totalReceived >= totalOrdered ? 'Delivered' : 'In Transit';
+
+    const prevStatus = receivingEntry.delivery_status;
+
+    await supabase.from('purchase_entries').update({
+      delivery_status: newStatus,
+      received_qty: totalReceived,
+      updated_at: new Date().toISOString(),
+    }).eq('id', receivingEntry.id);
+
+    if (newStatus === 'Delivered' && prevStatus !== 'Delivered' && receiveGodownId) {
+      const stockItems = receiveItems
+        .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
+        .map(i => {
+          const prod = products.find(p => p.id === i.product_id);
+          return {
+            product_id: i.product_id,
+            godown_id: receiveGodownId,
+            quantity: parseFloat(i.received_qty) || 0,
+            unit_price: prod?.purchase_price || 0,
+          };
+        });
+      if (stockItems.length > 0) {
+        await processStockMovement({
+          type: 'purchase',
+          items: stockItems,
+          reference_type: 'purchase_entry',
+          reference_id: receivingEntry.id,
+          reference_number: receivingEntry.entry_number,
+          notes: 'Goods received ' + receivingEntry.entry_number,
+        });
+      }
+    } else if (newStatus === 'In Transit' && receiveGodownId) {
+      const stockItems = receiveItems
+        .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
+        .map(i => {
+          const prod = products.find(p => p.id === i.product_id);
+          return {
+            product_id: i.product_id,
+            godown_id: receiveGodownId,
+            quantity: parseFloat(i.received_qty) || 0,
+            unit_price: prod?.purchase_price || 0,
+          };
+        });
+      if (stockItems.length > 0) {
+        await processStockMovement({
+          type: 'purchase',
+          items: stockItems,
+          reference_type: 'purchase_entry',
+          reference_id: receivingEntry.id,
+          reference_number: receivingEntry.entry_number,
+          notes: 'Partial goods received ' + receivingEntry.entry_number,
+        });
+      }
+    }
+
+    setShowReceiveModal(false);
+    setReceivingEntry(null);
+    loadData();
+  };
+
+  const handleSave = async () => {
     if (editingEntry) {
-      const prevStatus = editingEntry.delivery_status;
       await supabase.from('purchase_entries').update({
         supplier_id: form.supplier_id || null,
         supplier_name: form.supplier_name,
@@ -164,32 +246,8 @@ export default function Purchase() {
         outstanding_amount: subtotal,
         notes: form.notes,
         expected_delivery_date: form.expected_delivery_date || null,
-        delivery_status: deliveryStatus,
-        received_qty: receivedQty,
         updated_at: new Date().toISOString(),
       }).eq('id', editingEntry.id);
-
-      if (deliveryStatus === 'Delivered' && prevStatus !== 'Delivered' && form.godown_id) {
-        const stockItems = items
-          .filter(i => i.product_id)
-          .map(i => ({
-            product_id: i.product_id,
-            godown_id: form.godown_id,
-            quantity: parseFloat(i.quantity) || 0,
-            unit_price: parseFloat(i.unit_price) || 0,
-          }))
-          .filter(i => i.quantity > 0);
-        if (stockItems.length > 0) {
-          await processStockMovement({
-            type: 'purchase',
-            items: stockItems,
-            reference_type: 'purchase_entry',
-            reference_id: editingEntry.id,
-            reference_number: editingEntry.entry_number,
-            notes: 'Delivered ' + editingEntry.entry_number,
-          });
-        }
-      }
 
       await supabase.from('purchase_entry_items').delete().eq('purchase_entry_id', editingEntry.id);
       const updatedItems = items.filter(i => i.product_name).map(i => ({
@@ -215,8 +273,8 @@ export default function Purchase() {
         paid_amount: 0, outstanding_amount: subtotal,
         status: 'unpaid', notes: form.notes,
         expected_delivery_date: form.expected_delivery_date || null,
-        delivery_status: deliveryStatus,
-        received_qty: receivedQty,
+        delivery_status: 'Pending',
+        received_qty: 0,
       }).select().single();
 
       if (entry) {
@@ -231,36 +289,13 @@ export default function Purchase() {
         }));
         await supabase.from('purchase_entry_items').insert(entryItemPayload);
 
-        if (form.godown_id) {
-          const stockItems = items
-            .filter(i => i.product_id)
-            .map(i => ({
-              product_id: i.product_id,
-              godown_id: form.godown_id,
-              quantity: parseFloat(i.quantity) || 0,
-              unit_price: parseFloat(i.unit_price) || 0,
-            }))
-            .filter(i => i.quantity > 0);
-          if (stockItems.length > 0) {
-            await processStockMovement({
-              type: 'purchase',
-              items: stockItems,
-              reference_type: 'purchase_entry',
-              reference_id: entry.id,
-              reference_number: entryNumber,
-              notes: 'Purchase ' + entryNumber,
-            });
-          }
-        }
-
         for (const item of items.filter(i => i.product_id)) {
           const prod = products.find(p => p.id === item.product_id);
           if (parseFloat(item.unit_price) || prod?.purchase_price) {
-            const { error: priceErr } = await supabase.from('products').update({
+            await supabase.from('products').update({
               purchase_price: parseFloat(item.unit_price) || (prod?.purchase_price ?? 0),
               updated_at: new Date().toISOString(),
             }).eq('id', item.product_id);
-            if (priceErr) throw priceErr;
           }
         }
 
@@ -352,14 +387,6 @@ export default function Purchase() {
     loadData();
   };
 
-  const updateDeliveryStatus = async (entry: PurchaseEntry, newStatus: DeliveryStatus) => {
-    await supabase.from('purchase_entries').update({
-      delivery_status: newStatus,
-      updated_at: new Date().toISOString(),
-    }).eq('id', entry.id);
-    loadData();
-  };
-
   const toggleExpand = async (id: string) => {
     if (expandedEntry === id) { setExpandedEntry(null); return; }
     if (!entryItems[id]) {
@@ -379,6 +406,7 @@ export default function Purchase() {
       paid_amount: e.paid_amount,
       outstanding_amount: e.outstanding_amount,
       status: e.status,
+      delivery_status: e.delivery_status || 'Pending',
     })), 'purchase-entries');
   };
 
@@ -402,7 +430,6 @@ export default function Purchase() {
   );
 
   const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
-
   const totalPayable = entries.filter(e => e.status !== 'paid').reduce((s, e) => s + e.outstanding_amount, 0);
 
   if (!isAdmin) return null;
@@ -477,101 +504,126 @@ export default function Purchase() {
               <thead className="bg-neutral-50 border-b border-neutral-100">
                 <tr>
                   <th className="table-header w-8" />
-                  <th className="table-header text-left">Entry #</th>
+                  <th className="table-header text-left">Entry # / Products</th>
                   <th className="table-header text-left">Supplier</th>
                   <th className="table-header text-left">Date</th>
                   <th className="table-header text-left">Exp. Delivery</th>
-                  <th className="table-header text-right">Amount</th>
-                  <th className="table-header text-right">Outstanding</th>
-                  <th className="table-header text-left">Payment</th>
+                  <th className="table-header text-right">Amount / Payment</th>
                   <th className="table-header text-left">Delivery</th>
-                  <th className="table-header text-right">Action</th>
+                  <th className="table-header text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(e => {
                   const ds = computeDeliveryStatus(e);
+                  const cachedItems = entryItems[e.id] || [];
+                  const productPreview = cachedItems.length > 0
+                    ? cachedItems.slice(0, 3).map((i: any) => i.product_name).join(', ') + (cachedItems.length > 3 ? ` +${cachedItems.length - 3}` : '')
+                    : null;
+
                   return (
-                  <>
-                    <tr key={e.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                      <td className="table-cell">
-                        <button onClick={() => toggleExpand(e.id)} className="text-neutral-400 hover:text-primary-600">
-                          {expandedEntry === e.id ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                        </button>
-                      </td>
-                      <td className="table-cell font-medium text-primary-700 text-xs">{e.entry_number}</td>
-                      <td className="table-cell font-medium">{e.supplier_name}</td>
-                      <td className="table-cell text-neutral-500 text-sm">{formatDate(e.entry_date)}</td>
-                      <td className="table-cell text-sm">
-                        {e.expected_delivery_date ? (
-                          <span className={ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-600'}>
-                            {formatDate(e.expected_delivery_date)}
-                          </span>
-                        ) : <span className="text-neutral-300">-</span>}
-                      </td>
-                      <td className="table-cell text-right font-semibold">{formatCurrency(e.total_amount)}</td>
-                      <td className="table-cell text-right text-sm">
-                        {e.outstanding_amount > 0 ? (
-                          <span className="text-error-600 font-medium">{formatCurrency(e.outstanding_amount)}</span>
-                        ) : <span className="text-success-600">Paid</span>}
-                      </td>
-                      <td className="table-cell"><StatusBadge status={e.status} /></td>
-                      <td className="table-cell">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`badge text-[10px] ${DELIVERY_STATUS_COLORS[ds]}`}>{ds}</span>
-                          {ds !== 'Delivered' && (
-                            <select
-                              value={e.delivery_status}
-                              onChange={ev => updateDeliveryStatus(e, ev.target.value as DeliveryStatus)}
-                              className="text-[10px] border border-neutral-200 rounded px-1 py-0.5 bg-white text-neutral-600 cursor-pointer"
-                              onClick={ev => ev.stopPropagation()}
-                            >
-                              <option value="Pending">Pending</option>
-                              <option value="In Transit">In Transit</option>
-                              <option value="Delivered">Delivered</option>
-                            </select>
+                    <>
+                      <tr key={e.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
+                        <td className="table-cell w-8">
+                          <button
+                            onClick={() => toggleExpand(e.id)}
+                            className="text-neutral-400 hover:text-primary-600 transition-colors"
+                          >
+                            {expandedEntry === e.id
+                              ? <ChevronDown className="w-3.5 h-3.5" />
+                              : <ChevronRight className="w-3.5 h-3.5" />}
+                          </button>
+                        </td>
+                        <td className="table-cell">
+                          <p className="text-xs font-semibold text-primary-700 leading-tight">{e.entry_number}</p>
+                          {e.invoice_number && (
+                            <p className="text-[10px] text-neutral-400 leading-tight mt-0.5">Inv: {e.invoice_number}</p>
                           )}
-                        </div>
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {e.status === 'unpaid' && (
-                            <button onClick={() => markPaid(e)} className="text-xs text-primary-600 hover:underline font-medium">Mark Paid</button>
+                          {productPreview && (
+                            <p className="text-[10px] text-neutral-400 leading-tight mt-0.5 max-w-[160px] truncate">{productPreview}</p>
                           )}
-                          <ActionMenu items={[
-                            actionEdit(() => openEditEntry(e)),
-                            actionDelete(() => setConfirmEntry(e)),
-                          ]} />
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedEntry === e.id && entryItems[e.id] && (
-                      <tr key={`${e.id}-items`}>
-                        <td colSpan={10} className="bg-orange-50 px-8 py-3 border-b border-orange-100">
-                          <table className="w-full">
-                            <thead>
-                              <tr className="text-[10px] text-neutral-500 uppercase tracking-wider">
-                                <th className="text-left pb-1 font-semibold">Product</th>
-                                <th className="text-right pb-1 font-semibold w-24">Qty</th>
-                                <th className="text-right pb-1 font-semibold w-28">Unit Price</th>
-                                <th className="text-right pb-1 font-semibold w-28">Total</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {entryItems[e.id].map((item: any) => (
-                                <tr key={item.id} className="text-xs">
-                                  <td className="py-0.5 text-neutral-800 font-medium">{item.product_name}</td>
-                                  <td className="py-0.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
-                                  <td className="py-0.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
-                                  <td className="py-0.5 text-right font-semibold">{formatCurrency(item.total_price)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        </td>
+                        <td className="table-cell">
+                          <p className="text-sm font-medium text-neutral-800">{e.supplier_name}</p>
+                        </td>
+                        <td className="table-cell">
+                          <p className="text-xs text-neutral-500">{formatDate(e.entry_date)}</p>
+                        </td>
+                        <td className="table-cell">
+                          {e.expected_delivery_date ? (
+                            <p className={`text-xs ${ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-500'}`}>
+                              {formatDate(e.expected_delivery_date)}
+                            </p>
+                          ) : <p className="text-xs text-neutral-300">—</p>}
+                        </td>
+                        <td className="table-cell text-right">
+                          <p className="text-sm font-semibold text-neutral-900">{formatCurrency(e.total_amount)}</p>
+                          <p className={`text-[10px] font-medium mt-0.5 ${e.outstanding_amount > 0 ? 'text-error-600' : 'text-success-600'}`}>
+                            {e.outstanding_amount > 0 ? `${formatCurrency(e.outstanding_amount)} unpaid` : 'Paid'}
+                          </p>
+                        </td>
+                        <td className="table-cell">
+                          <span className={`badge text-[10px] font-medium ${DELIVERY_STATUS_COLORS[ds]}`}>{ds}</span>
+                        </td>
+                        <td className="table-cell text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {ds !== 'Delivered' && (
+                              <button
+                                onClick={() => openReceiveGoods(e)}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
+                              >
+                                <Truck className="w-3 h-3" /> Receive
+                              </button>
+                            )}
+                            {e.status === 'unpaid' && (
+                              <button
+                                onClick={() => markPaid(e)}
+                                className="inline-flex items-center text-[10px] font-semibold text-primary-600 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
+                              >
+                                Mark Paid
+                              </button>
+                            )}
+                            <ActionMenu items={[
+                              actionEdit(() => openEditEntry(e)),
+                              actionDelete(() => setConfirmEntry(e)),
+                            ]} />
+                          </div>
                         </td>
                       </tr>
-                    )}
-                  </>
+                      {expandedEntry === e.id && entryItems[e.id] && (
+                        <tr key={`${e.id}-items`}>
+                          <td colSpan={8} className="bg-amber-50 px-8 py-3 border-b border-amber-100">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                  <th className="text-left pb-1 font-semibold">Product</th>
+                                  <th className="text-right pb-1 font-semibold w-24">Ordered</th>
+                                  <th className="text-right pb-1 font-semibold w-24">Received</th>
+                                  <th className="text-right pb-1 font-semibold w-28">Unit Price</th>
+                                  <th className="text-right pb-1 font-semibold w-28">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {entryItems[e.id].map((item: any) => {
+                                  const recvd = parseFloat(e.received_qty as any) || 0;
+                                  return (
+                                    <tr key={item.id} className="text-xs">
+                                      <td className="py-0.5 text-neutral-800 font-medium">{item.product_name}</td>
+                                      <td className="py-0.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
+                                      <td className={`py-0.5 text-right font-medium ${recvd >= item.quantity ? 'text-success-600' : recvd > 0 ? 'text-warning-600' : 'text-neutral-400'}`}>
+                                        {recvd >= item.quantity ? item.quantity : recvd > 0 ? recvd : '—'}
+                                      </td>
+                                      <td className="py-0.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
+                                      <td className="py-0.5 text-right font-semibold">{formatCurrency(item.total_price)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
@@ -623,6 +675,7 @@ export default function Purchase() {
         )}
       </div>
 
+      {/* New / Edit Purchase Entry Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingEntry ? 'Edit Purchase Entry' : 'New Purchase Entry'} size="xl"
         footer={
           <>
@@ -649,10 +702,10 @@ export default function Purchase() {
             </div>
             <div>
               <label className="label flex items-center gap-1.5">
-                <Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Receive Into Godown *
+                <Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Receive Into Godown
               </label>
               <select value={form.godown_id} onChange={e => setForm(f => ({ ...f, godown_id: e.target.value }))} className="input">
-                <option value="">-- Select Godown --</option>
+                <option value="">-- Select Godown (optional) --</option>
                 {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.code ? ` (${g.code})` : ''}</option>)}
               </select>
             </div>
@@ -666,20 +719,7 @@ export default function Purchase() {
               </label>
               <input type="date" value={form.expected_delivery_date} onChange={e => setForm(f => ({ ...f, expected_delivery_date: e.target.value }))} className="input" />
             </div>
-            <div>
-              <label className="label">Delivery Status</label>
-              <select value={form.delivery_status} onChange={e => setForm(f => ({ ...f, delivery_status: e.target.value as DeliveryStatus }))} className="input">
-                <option value="Pending">Pending</option>
-                <option value="In Transit">In Transit</option>
-                <option value="Delivered">Delivered</option>
-                <option value="Delayed">Delayed</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Received Qty (total)</label>
-              <input type="number" min="0" value={form.received_qty} onChange={e => setForm(f => ({ ...f, received_qty: e.target.value }))} className="input" placeholder="0" />
-            </div>
-            <div>
+            <div className="col-span-3">
               <label className="label">Notes</label>
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Optional" />
             </div>
@@ -731,6 +771,83 @@ export default function Purchase() {
         </div>
       </Modal>
 
+      {/* Receive Goods Modal */}
+      <Modal
+        isOpen={showReceiveModal}
+        onClose={() => setShowReceiveModal(false)}
+        title={`Receive Goods — ${receivingEntry?.entry_number}`}
+        size="lg"
+        footer={
+          <>
+            <button onClick={() => setShowReceiveModal(false)} className="btn-secondary">Cancel</button>
+            <button onClick={handleConfirmReceive} className="btn-primary">Confirm Receipt</button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="border border-neutral-200 rounded-lg overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="table-header text-left">Product</th>
+                  <th className="table-header text-right w-28">Ordered Qty</th>
+                  <th className="table-header text-right w-32">Received Qty</th>
+                  <th className="table-header text-right w-28">Remaining</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receiveItems.map((item, i) => {
+                  const recv = parseFloat(item.received_qty) || 0;
+                  const remaining = Math.max(0, item.ordered_qty - recv);
+                  return (
+                    <tr key={i} className="border-t border-neutral-100">
+                      <td className="px-3 py-2.5">
+                        <p className="text-sm font-medium text-neutral-800">{item.product_name}</p>
+                        <p className="text-[10px] text-neutral-400">{item.unit}</p>
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-sm text-neutral-600">{item.ordered_qty}</td>
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.ordered_qty}
+                          value={item.received_qty}
+                          onChange={e => setReceiveItems(prev => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], received_qty: e.target.value };
+                            return next;
+                          })}
+                          className="input text-xs text-right w-full"
+                        />
+                      </td>
+                      <td className={`px-3 py-2.5 text-right text-sm font-medium ${remaining === 0 ? 'text-success-600' : 'text-warning-600'}`}>
+                        {remaining === 0 ? '✓ Complete' : remaining}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <label className="label flex items-center gap-1.5">
+              <Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Receive Into Warehouse *
+            </label>
+            <select value={receiveGodownId} onChange={e => setReceiveGodownId(e.target.value)} className="input">
+              <option value="">-- Select Warehouse --</option>
+              {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.code ? ` (${g.code})` : ''}</option>)}
+            </select>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-700">
+            <p className="font-semibold mb-0.5">What happens next:</p>
+            <p>Stock will be added to the selected warehouse. If all items are fully received, delivery status becomes <strong>Delivered</strong>. Partial receipt marks it as <strong>In Transit</strong>.</p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Supplier Modal */}
       <Modal isOpen={showSupplierModal} onClose={() => setShowSupplierModal(false)} title={editingSupplier ? 'Edit Supplier' : 'Add Supplier'} size="md"
         footer={
           <>
