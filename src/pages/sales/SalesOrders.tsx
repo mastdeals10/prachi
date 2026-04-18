@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight, XCircle, X } from 'lucide-react';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase';
@@ -13,6 +13,7 @@ import { fetchGodowns, getGodownStockForProduct } from '../../services/godownSer
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import SalesOrderPrint from './SalesOrderPrint';
+import ProductCombobox from '../../components/ui/ProductCombobox';
 import type { SalesOrder, SalesOrderItem, Product, Customer, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -62,6 +63,19 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [filterTo, setFilterTo] = useState('');
   const [cancelSOTarget, setCancelSOTarget] = useState<SalesOrder | null>(null);
 
+  const customerSelectRef = useRef<HTMLSelectElement>(null);
+  const productRefs = useRef<Array<React.RefObject<HTMLInputElement>>>([]);
+  const qtyRefs = useRef<Array<React.RefObject<HTMLInputElement>>>([]);
+
+  const getProductRef = (i: number): React.RefObject<HTMLInputElement> => {
+    if (!productRefs.current[i]) productRefs.current[i] = React.createRef<HTMLInputElement>();
+    return productRefs.current[i];
+  };
+  const getQtyRef = (i: number): React.RefObject<HTMLInputElement> => {
+    if (!qtyRefs.current[i]) qtyRefs.current[i] = React.createRef<HTMLInputElement>();
+    return qtyRefs.current[i];
+  };
+
   const [form, setForm] = useState({
     customer_id: '', customer_name: '', customer_phone: '',
     customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '',
@@ -82,6 +96,28 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
+
+  useEffect(() => {
+    if (showModal) {
+      setTimeout(() => customerSelectRef.current?.focus(), 80);
+    } else {
+      productRefs.current = [];
+      qtyRefs.current = [];
+    }
+  }, [showModal]);
+
+  const saveActionRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showModal && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        saveActionRef.current();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showModal]);
 
   const loadData = async () => {
     const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
@@ -125,8 +161,76 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     setExpandedRows(next);
   };
 
-  const addItem = () => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]);
+  const addItem = (focusNew = false) => {
+    setItems(prev => {
+      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }];
+      if (focusNew) {
+        const newIdx = next.length - 1;
+        setTimeout(() => getProductRef(newIdx).current?.focus(), 30);
+      }
+      return next;
+    });
+  };
   const removeItem = (i: number) => setItems(prev => prev.filter((_, idx) => idx !== i));
+
+  const handleProductSelect = useCallback(async (i: number, product: Product) => {
+    setItems(prev => {
+      const next = [...prev];
+      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), quantity: '1' };
+      const price = product.selling_price;
+      next[i].total_price = price;
+      return next;
+    });
+
+    const { data: stockRows } = await supabase
+      .from('godown_stock')
+      .select('godown_id, quantity')
+      .eq('product_id', product.id)
+      .gt('quantity', 0)
+      .order('quantity', { ascending: false })
+      .limit(1);
+    const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+    setItems(prev => {
+      const next = [...prev];
+      next[i] = { ...next[i], godown_id: bestGodown };
+      return next;
+    });
+    if (bestGodown) loadGodownStock(bestGodown, [product.id]);
+
+    if (form.customer_id) {
+      const smartRate = await getSmartRate(form.customer_id, product.id, product.selling_price);
+      if (smartRate !== product.selling_price) {
+        setItems(prev => {
+          const next = [...prev];
+          next[i] = { ...next[i], unit_price: String(smartRate), total_price: smartRate };
+          return next;
+        });
+      }
+    }
+
+    setTimeout(() => {
+      const qtyInput = getQtyRef(i).current;
+      if (qtyInput) { qtyInput.focus(); qtyInput.select(); }
+    }, 30);
+  }, [form.customer_id, godowns]);
+
+  const handleQtyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, i: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (i === items.length - 1) {
+        addItem(true);
+      } else {
+        setTimeout(() => getProductRef(i + 1).current?.focus(), 20);
+      }
+    }
+  };
+
+  const handleCustomerKeyDown = (e: React.KeyboardEvent<HTMLSelectElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setTimeout(() => getProductRef(0).current?.focus(), 20);
+    }
+  };
 
   const updateItem = async (i: number, field: string, value: string) => {
     setItems(prev => {
@@ -735,12 +839,18 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         </div>
       </div>
 
+      {/* keep saveActionRef in sync with current edit/save functions */}
+      {(() => { saveActionRef.current = editOrder ? handleEdit : handleSave; return null; })()}
+
       <Modal isOpen={showModal} onClose={() => { setShowModal(false); setEditOrder(null); }} title={editOrder ? `Edit Sales Order — ${editOrder.so_number}` : 'New Sales Order'} size="xl"
         footer={
-          <>
-            <button onClick={() => { setShowModal(false); setEditOrder(null); }} className="btn-secondary">Cancel</button>
-            <button onClick={editOrder ? handleEdit : handleSave} className="btn-primary">{editOrder ? 'Save Changes' : 'Create Order'}</button>
-          </>
+          <div className="flex items-center justify-between w-full">
+            <span className="text-[10px] text-neutral-400 select-none">Ctrl+Enter to save</span>
+            <div className="flex gap-2">
+              <button onClick={() => { setShowModal(false); setEditOrder(null); }} className="btn-secondary">Cancel</button>
+              <button onClick={editOrder ? handleEdit : handleSave} className="btn-primary">{editOrder ? 'Save Changes' : 'Create Order'}</button>
+            </div>
+          </div>
         }>
         <div className="space-y-3">
           {/* Mode toggle */}
@@ -763,7 +873,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           <div className="grid grid-cols-4 gap-2">
             <div>
               <label className="label">{form.is_b2b ? 'Bill To' : 'Customer'}</label>
-              <select value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} className="input text-xs">
+              <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs">
                 <option value="">-- Select --</option>
                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -916,16 +1026,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                     return (
                       <tr key={i} className="border-t border-neutral-100">
                         <td className="px-3 py-2">
-                          <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
-                            <option value="">-- Select Product --</option>
-                            {products.map(p => {
-                              const stockQty = form.godown_id && godownStockMap[p.id] !== undefined
-                                ? godownStockMap[p.id]
-                                : p.stock_quantity;
-                              return <option key={p.id} value={p.id}>{p.name} (Stock: {stockQty})</option>;
-                            })}
-                          </select>
-                          {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
+                          <ProductCombobox
+                            products={products}
+                            value={item.product_id}
+                            onSelect={p => handleProductSelect(i, p)}
+                            inputRef={getProductRef(i)}
+                            godownStockMap={godownStockMap}
+                          />
                         </td>
                         <td className="px-3 py-2 w-32">
                           <select value={item.godown_id} onChange={e => {
@@ -945,8 +1052,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           })()}
                         </td>
                         <td className="px-3 py-2 w-20">
-                          <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
-
+                          <input ref={getQtyRef(i)} type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
                         </td>
                         <td className="px-3 py-2 w-24"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
                         <td className="px-3 py-2 w-16"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
