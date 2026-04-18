@@ -231,6 +231,13 @@ export interface SalesOrder {
   notes?: string;
   is_b2b?: boolean;
   ship_to_customer_id?: string | null;
+  ship_to_name?: string;
+  ship_to_address1?: string;
+  ship_to_address2?: string;
+  ship_to_city?: string;
+  ship_to_state?: string;
+  ship_to_pin?: string;
+  ship_to_phone?: string;
   items?: SalesOrderItem[];
   created_at: string;
 }

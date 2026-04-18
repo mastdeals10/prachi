@@ -69,7 +69,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     courier_charges: '0', discount_amount: '0', notes: '',
     godown_id: '',
     is_b2b: false,
+    ship_to_mode: 'customer' as 'customer' | 'manual',
     ship_to_customer_id: '',
+    ship_to_name: '',
+    ship_to_address1: '',
+    ship_to_address2: '',
+    ship_to_city: '',
+    ship_to_state: '',
+    ship_to_pin: '',
+    ship_to_phone: '',
   });
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
@@ -195,6 +203,21 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     }));
   };
 
+  const handleShipToCustomerChange = (id: string) => {
+    const c = customers.find(c => c.id === id);
+    setForm(f => ({
+      ...f,
+      ship_to_customer_id: id,
+      ship_to_name: c?.name || '',
+      ship_to_address1: (c as Customer & { address?: string })?.address || '',
+      ship_to_address2: (c as Customer & { address2?: string })?.address2 || '',
+      ship_to_city: c?.city || '',
+      ship_to_state: c?.state || '',
+      ship_to_pin: (c as Customer & { pincode?: string })?.pincode || '',
+      ship_to_phone: (c as Customer & { phone?: string })?.phone || '',
+    }));
+  };
+
   const subtotal = items.reduce((s, i) => s + i.total_price, 0);
   const total = subtotal + (parseFloat(form.courier_charges) || 0) - (parseFloat(form.discount_amount) || 0);
 
@@ -213,8 +236,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert('Please select a customer.');
       return;
     }
-    if (form.is_b2b && !form.ship_to_customer_id) {
+    if (form.is_b2b && form.ship_to_mode === 'customer' && !form.ship_to_customer_id) {
       alert('B2B orders require a Ship To customer.');
+      return;
+    }
+    if (form.is_b2b && form.ship_to_mode === 'manual' && !form.ship_to_name.trim()) {
+      alert('Please enter a Ship To name for manual delivery address.');
       return;
     }
     try {
@@ -240,7 +267,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         godown_id: form.godown_id || null,
         company_id: soCompanyId,
         is_b2b: form.is_b2b,
-        ship_to_customer_id: form.is_b2b ? (form.ship_to_customer_id || null) : null,
+        ship_to_customer_id: (form.is_b2b && form.ship_to_mode === 'customer') ? (form.ship_to_customer_id || null) : null,
+        ship_to_name: form.is_b2b ? form.ship_to_name : null,
+        ship_to_address1: form.is_b2b ? form.ship_to_address1 : null,
+        ship_to_address2: form.is_b2b ? form.ship_to_address2 : null,
+        ship_to_city: form.is_b2b ? form.ship_to_city : null,
+        ship_to_state: form.is_b2b ? form.ship_to_state : null,
+        ship_to_pin: form.is_b2b ? form.ship_to_pin : null,
+        ship_to_phone: form.is_b2b ? form.ship_to_phone : null,
         items: itemsWithProduct.map(i => ({
           product_id: i.product_id,
           product_name: i.product_name,
@@ -267,8 +301,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
       return;
     }
-    if (form.is_b2b && !form.ship_to_customer_id) {
+    if (form.is_b2b && form.ship_to_mode === 'customer' && !form.ship_to_customer_id) {
       alert('B2B orders require a Ship To customer.');
+      return;
+    }
+    if (form.is_b2b && form.ship_to_mode === 'manual' && !form.ship_to_name.trim()) {
+      alert('Please enter a Ship To name for manual delivery address.');
       return;
     }
     try {
@@ -289,7 +327,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         total_amount: total,
         notes: form.notes,
         is_b2b: form.is_b2b,
-        ship_to_customer_id: form.is_b2b ? (form.ship_to_customer_id || null) : null,
+        ship_to_customer_id: (form.is_b2b && form.ship_to_mode === 'customer') ? (form.ship_to_customer_id || null) : null,
+        ship_to_name: form.is_b2b ? form.ship_to_name : null,
+        ship_to_address1: form.is_b2b ? form.ship_to_address1 : null,
+        ship_to_address2: form.is_b2b ? form.ship_to_address2 : null,
+        ship_to_city: form.is_b2b ? form.ship_to_city : null,
+        ship_to_state: form.is_b2b ? form.ship_to_state : null,
+        ship_to_pin: form.is_b2b ? form.ship_to_pin : null,
+        ship_to_phone: form.is_b2b ? form.ship_to_phone : null,
       }).eq('id', editOrder.id);
       if (updateErr) throw updateErr;
       const { error: delItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', editOrder.id);
@@ -336,7 +381,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       notes: order.notes || '',
       godown_id: '',
       is_b2b: order.is_b2b || false,
+      ship_to_mode: (order.ship_to_customer_id ? 'customer' : (order.ship_to_name ? 'manual' : 'customer')) as 'customer' | 'manual',
       ship_to_customer_id: order.ship_to_customer_id || '',
+      ship_to_name: order.ship_to_name || '',
+      ship_to_address1: order.ship_to_address1 || '',
+      ship_to_address2: order.ship_to_address2 || '',
+      ship_to_city: order.ship_to_city || '',
+      ship_to_state: order.ship_to_state || '',
+      ship_to_pin: order.ship_to_pin || '',
+      ship_to_phone: order.ship_to_phone || '',
     });
     setItems(
       existingItems && existingItems.length > 0
@@ -509,7 +562,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           </button>
           <button onClick={() => {
             setEditOrder(null);
-            setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_customer_id: '' });
+            setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
             setGodownStockMap({});
             setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
             setShowModal(true);
@@ -696,7 +749,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             <div className="flex rounded-lg border border-neutral-200 overflow-hidden text-xs font-medium">
               <button
                 type="button"
-                onClick={() => setForm(f => ({ ...f, is_b2b: false, ship_to_customer_id: '' }))}
+                onClick={() => setForm(f => ({ ...f, is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' }))}
                 className={`px-3 py-1.5 transition-colors ${!form.is_b2b ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}
               >Normal</button>
               <button
@@ -758,21 +811,82 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
           {/* Ship To — only shown in B2B mode */}
           {form.is_b2b && (
-            <div className="grid grid-cols-4 gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5">
-              <div className="col-span-2">
-                <label className="label text-blue-700">Ship To Customer <span className="text-error-500">*</span></label>
-                <select
-                  value={form.ship_to_customer_id}
-                  onChange={e => setForm(f => ({ ...f, ship_to_customer_id: e.target.value }))}
-                  className="input text-xs border-blue-200 focus:ring-blue-400"
-                >
-                  <option value="">-- Select Ship To --</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+            <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-blue-700 flex-1">Ship To</p>
+                <div className="flex rounded border border-blue-200 overflow-hidden text-[11px] font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, ship_to_mode: 'customer' }))}
+                    className={`px-2.5 py-1 transition-colors ${form.ship_to_mode === 'customer' ? 'bg-blue-600 text-white' : 'bg-white text-blue-500 hover:bg-blue-50'}`}
+                  >Select Customer</button>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, ship_to_mode: 'manual', ship_to_customer_id: '' }))}
+                    className={`px-2.5 py-1 transition-colors ${form.ship_to_mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-white text-blue-500 hover:bg-blue-50'}`}
+                  >Manual Address</button>
+                </div>
               </div>
-              <div className="col-span-2 flex items-end">
-                <p className="text-[10px] text-blue-500 leading-relaxed">In B2B mode, goods ship directly to this customer. The Bill To customer above is invoiced.</p>
-              </div>
+
+              {form.ship_to_mode === 'customer' ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label text-blue-700">Customer <span className="text-error-500">*</span></label>
+                    <select
+                      value={form.ship_to_customer_id}
+                      onChange={e => handleShipToCustomerChange(e.target.value)}
+                      className="input text-xs border-blue-200 focus:ring-blue-400"
+                    >
+                      <option value="">-- Select Ship To --</option>
+                      {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  {form.ship_to_name && (
+                    <div className="flex items-end">
+                      <p className="text-[10px] text-blue-600 leading-relaxed">
+                        {[form.ship_to_address1, form.ship_to_city, form.ship_to_state, form.ship_to_pin].filter(Boolean).join(', ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label text-blue-700">Name <span className="text-error-500">*</span></label>
+                      <input value={form.ship_to_name} onChange={e => setForm(f => ({ ...f, ship_to_name: e.target.value }))} className="input text-xs border-blue-200" placeholder="Recipient name" />
+                    </div>
+                    <div>
+                      <label className="label text-blue-700">Phone</label>
+                      <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs border-blue-200" placeholder="+91..." />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label text-blue-700">Address Line 1</label>
+                      <input value={form.ship_to_address1} onChange={e => setForm(f => ({ ...f, ship_to_address1: e.target.value }))} className="input text-xs border-blue-200" placeholder="Street / House No." />
+                    </div>
+                    <div>
+                      <label className="label text-blue-700">Address Line 2</label>
+                      <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs border-blue-200" placeholder="Area / Landmark" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="label text-blue-700">City</label>
+                      <input value={form.ship_to_city} onChange={e => setForm(f => ({ ...f, ship_to_city: e.target.value }))} className="input text-xs border-blue-200" placeholder="City" />
+                    </div>
+                    <div>
+                      <label className="label text-blue-700">State</label>
+                      <input value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs border-blue-200" placeholder="State" />
+                    </div>
+                    <div>
+                      <label className="label text-blue-700">PIN</label>
+                      <input value={form.ship_to_pin} onChange={e => setForm(f => ({ ...f, ship_to_pin: e.target.value }))} className="input text-xs border-blue-200" placeholder="PIN" maxLength={6} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
