@@ -864,24 +864,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
               >Normal</button>
               <button
                 type="button"
-                onClick={() => setForm(f => ({ ...f, is_b2b: true }))}
+                onClick={() => setForm(f => ({ ...f, is_b2b: true, ship_to_mode: 'manual' }))}
                 className={`px-3 py-1.5 transition-colors ${form.is_b2b ? 'bg-blue-600 text-white' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}
               >B2B</button>
             </div>
           </div>
-          {/* Row 1: Order meta — 4 fields in one line */}
-          <div className="grid grid-cols-4 gap-2">
-            <div>
-              <label className="label">{form.is_b2b ? 'Bill To' : 'Customer'}</label>
-              <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs">
-                <option value="">-- Select --</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">{form.is_b2b ? 'Bill To Name *' : 'Customer Name *'}</label>
-              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Full name" />
-            </div>
+          {/* Dates row */}
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">SO Date</label>
               <input type="date" value={form.so_date} onChange={e => setForm(f => ({ ...f, so_date: e.target.value }))} className="input text-xs" />
@@ -891,113 +880,86 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
               <input type="date" value={form.delivery_date} onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))} className="input text-xs" />
             </div>
           </div>
-          {/* Row 2: Address across full width */}
-          <div className="grid grid-cols-4 gap-2">
-            <div className="col-span-2">
-              <label className="label">Address Line 1</label>
-              <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input text-xs" placeholder="Street / House No." />
-            </div>
-            <div className="col-span-2">
-              <label className="label">Address Line 2</label>
-              <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input text-xs" placeholder="Area / Landmark" />
-            </div>
-            <div>
-              <label className="label">City</label>
-              <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input text-xs" placeholder="City" />
-            </div>
-            <div>
-              <label className="label">State</label>
-              <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs" placeholder="State" />
-            </div>
-            <div>
-              <label className="label">PIN</label>
-              <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
-            </div>
-            <div>
-              <label className="label">Phone</label>
-              <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input text-xs" placeholder="+91..." />
-            </div>
-          </div>
 
-          {/* Ship To — only shown in B2B mode */}
-          {form.is_b2b && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-semibold text-blue-700 flex-1">Ship To</p>
-                <div className="flex rounded border border-blue-200 overflow-hidden text-[11px] font-medium">
-                  <button
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, ship_to_mode: 'customer' }))}
-                    className={`px-2.5 py-1 transition-colors ${form.ship_to_mode === 'customer' ? 'bg-blue-600 text-white' : 'bg-white text-blue-500 hover:bg-blue-50'}`}
-                  >Select Customer</button>
-                  <button
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, ship_to_mode: 'manual', ship_to_customer_id: '' }))}
-                    className={`px-2.5 py-1 transition-colors ${form.ship_to_mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-white text-blue-500 hover:bg-blue-50'}`}
-                  >Manual Address</button>
+          {form.is_b2b ? (
+            /* B2B: side-by-side Bill To / Ship To */
+            <div className="grid grid-cols-2 gap-4 border border-neutral-200 rounded-lg p-3 bg-neutral-50">
+              {/* Bill To */}
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Bill To</p>
+                <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs">
+                  <option value="">-- Select Customer --</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Full name *" />
+                <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input text-xs" placeholder="Address Line 1" />
+                <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input text-xs" placeholder="Address Line 2" />
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input text-xs" placeholder="City" />
+                  <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs" placeholder="State" />
+                  <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
                 </div>
+                <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input text-xs" placeholder="Phone" />
               </div>
 
-              {form.ship_to_mode === 'customer' ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="label text-blue-700">Customer <span className="text-error-500">*</span></label>
-                    <select
-                      value={form.ship_to_customer_id}
-                      onChange={e => handleShipToCustomerChange(e.target.value)}
-                      className="input text-xs border-blue-200 focus:ring-blue-400"
-                    >
-                      <option value="">-- Select Ship To --</option>
-                      {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  {form.ship_to_name && (
-                    <div className="flex items-end">
-                      <p className="text-[10px] text-blue-600 leading-relaxed">
-                        {[form.ship_to_address1, form.ship_to_city, form.ship_to_state, form.ship_to_pin].filter(Boolean).join(', ')}
-                      </p>
-                    </div>
-                  )}
+              {/* Ship To — always manual in B2B */}
+              <div className="space-y-1.5 border-l border-neutral-200 pl-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Ship To</p>
+                <input value={form.ship_to_name} onChange={e => setForm(f => ({ ...f, ship_to_name: e.target.value }))} className="input text-xs" placeholder="Recipient name *" />
+                <input value={form.ship_to_address1} onChange={e => setForm(f => ({ ...f, ship_to_address1: e.target.value }))} className="input text-xs" placeholder="Address Line 1" />
+                <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs" placeholder="Address Line 2" />
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input value={form.ship_to_city} onChange={e => setForm(f => ({ ...f, ship_to_city: e.target.value }))} className="input text-xs" placeholder="City" />
+                  <input value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs" placeholder="State" />
+                  <input value={form.ship_to_pin} onChange={e => setForm(f => ({ ...f, ship_to_pin: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="label text-blue-700">Name <span className="text-error-500">*</span></label>
-                      <input value={form.ship_to_name} onChange={e => setForm(f => ({ ...f, ship_to_name: e.target.value }))} className="input text-xs border-blue-200" placeholder="Recipient name" />
-                    </div>
-                    <div>
-                      <label className="label text-blue-700">Phone</label>
-                      <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs border-blue-200" placeholder="+91..." />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="label text-blue-700">Address Line 1</label>
-                      <input value={form.ship_to_address1} onChange={e => setForm(f => ({ ...f, ship_to_address1: e.target.value }))} className="input text-xs border-blue-200" placeholder="Street / House No." />
-                    </div>
-                    <div>
-                      <label className="label text-blue-700">Address Line 2</label>
-                      <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs border-blue-200" placeholder="Area / Landmark" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="label text-blue-700">City</label>
-                      <input value={form.ship_to_city} onChange={e => setForm(f => ({ ...f, ship_to_city: e.target.value }))} className="input text-xs border-blue-200" placeholder="City" />
-                    </div>
-                    <div>
-                      <label className="label text-blue-700">State</label>
-                      <input value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs border-blue-200" placeholder="State" />
-                    </div>
-                    <div>
-                      <label className="label text-blue-700">PIN</label>
-                      <input value={form.ship_to_pin} onChange={e => setForm(f => ({ ...f, ship_to_pin: e.target.value }))} className="input text-xs border-blue-200" placeholder="PIN" maxLength={6} />
-                    </div>
-                  </div>
-                </div>
-              )}
+                <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs" placeholder="Phone" />
+              </div>
             </div>
+          ) : (
+            /* Normal mode: stacked customer address */
+            <>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="label">Customer</label>
+                  <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs">
+                    <option value="">-- Select --</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Customer Name *</label>
+                  <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Full name" />
+                </div>
+                <div className="col-span-2" />
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="col-span-2">
+                  <label className="label">Address Line 1</label>
+                  <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input text-xs" placeholder="Street / House No." />
+                </div>
+                <div className="col-span-2">
+                  <label className="label">Address Line 2</label>
+                  <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input text-xs" placeholder="Area / Landmark" />
+                </div>
+                <div>
+                  <label className="label">City</label>
+                  <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input text-xs" placeholder="City" />
+                </div>
+                <div>
+                  <label className="label">State</label>
+                  <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs" placeholder="State" />
+                </div>
+                <div>
+                  <label className="label">PIN</label>
+                  <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
+                </div>
+                <div>
+                  <label className="label">Phone</label>
+                  <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input text-xs" placeholder="+91..." />
+                </div>
+              </div>
+            </>
           )}
 
           <div>
