@@ -87,3 +87,17 @@ export async function createInvoice(
   if (error) throw error;
   return data as string;
 }
+
+export async function cancelDeliveryChallan(deliveryChallanId: string): Promise<void> {
+  const { error } = await supabase.rpc('cancel_delivery_challan', {
+    p_dc_id: deliveryChallanId,
+  });
+  if (error) throw error;
+}
+
+export async function cancelInvoice(invoiceId: string): Promise<void> {
+  const { error } = await supabase.rpc('cancel_invoice', {
+    p_invoice_id: invoiceId,
+  });
+  if (error) throw error;
+}

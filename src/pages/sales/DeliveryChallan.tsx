@@ -10,7 +10,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import ChallanPrint from './ChallanPrint';
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
-import { createDeliveryChallan } from '../../services/documentFlowService';
+import { createDeliveryChallan, cancelDeliveryChallan } from '../../services/documentFlowService';
 import type { DeliveryChallan as DCType, Product, Customer, SalesOrder, SalesOrderItem } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -327,11 +327,16 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    // Delete items first, then the challan itself
-    await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', deleteTarget.id);
-    await supabase.from('delivery_challans').delete().eq('id', deleteTarget.id);
-    setDeleteTarget(null);
-    loadData();
+    try {
+      // Soft-cancel via RPC: reverses stock and rolls parent SO back to confirmed.
+      // Hard delete would lose audit trail and skip stock reversal.
+      await cancelDeliveryChallan(deleteTarget.id);
+      setDeleteTarget(null);
+      loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel delivery challan';
+      alert(msg);
+    }
   };
 
   const openPrint = async (dc: DCType) => {

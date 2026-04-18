@@ -12,7 +12,7 @@ import { getSmartRate } from '../../lib/rateCardService';
 import { getCompanyById } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import { fetchGodowns } from '../../services/godownService';
-import { createInvoice } from '../../services/documentFlowService';
+import { createInvoice, cancelInvoice } from '../../services/documentFlowService';
 import type { Invoice, Product, Customer, SalesOrder, DeliveryChallan, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -539,35 +539,15 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
 
   const handleDelete = async () => {
     if (!selectedInvoice) return;
-    const outstanding = selectedInvoice.outstanding_amount || 0;
-    await supabase.from('invoices').update({
-      status: 'cancelled',
-      outstanding_amount: 0,
-    }).eq('id', selectedInvoice.id);
-
-    if (selectedInvoice.customer_id && outstanding > 0) {
-      const { data: cust } = await supabase.from('customers').select('balance, total_revenue').eq('id', selectedInvoice.customer_id).maybeSingle();
-      if (cust) {
-        await supabase.from('customers').update({
-          balance: Math.max(0, (cust.balance || 0) - outstanding),
-          total_revenue: Math.max(0, (cust.total_revenue || 0) - selectedInvoice.total_amount),
-        }).eq('id', selectedInvoice.customer_id);
-      }
+    try {
+      // Soft-cancel via RPC: writes reversing ledger entry and re-opens the
+      // parent DC. Stock is NOT touched (DC owns stock).
+      await cancelInvoice(selectedInvoice.id);
+      loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel invoice';
+      alert(msg);
     }
-
-    await supabase.from('ledger_entries').insert({
-      entry_date: new Date().toISOString().split('T')[0],
-      entry_type: 'credit',
-      account_type: 'customer',
-      party_id: selectedInvoice.customer_id || null,
-      party_name: selectedInvoice.customer_name,
-      reference_type: 'invoice',
-      reference_id: selectedInvoice.id,
-      description: 'Cancellation of Invoice ' + selectedInvoice.invoice_number,
-      amount: outstanding,
-    });
-
-    loadData();
   };
 
   const openPrint = async (inv: Invoice) => {
