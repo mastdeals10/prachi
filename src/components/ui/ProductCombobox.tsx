@@ -108,7 +108,7 @@ export default function ProductCombobox({
       {open && filtered.length > 0 && (
         <ul
           ref={listRef}
-          className="absolute z-50 left-0 right-0 mt-0.5 max-h-52 overflow-y-auto bg-white border border-neutral-200 rounded-lg shadow-lg py-1"
+          className="absolute z-50 left-0 right-0 top-full max-h-44 overflow-y-auto bg-white border border-neutral-200 rounded shadow-md py-0.5"
         >
           {filtered.map((p, idx) => {
             const stock = godownStockMap[p.id] !== undefined ? godownStockMap[p.id] : p.stock_quantity ?? 0;
@@ -117,9 +117,9 @@ export default function ProductCombobox({
                 key={p.id}
                 onMouseDown={e => { e.preventDefault(); confirmSelection(p); }}
                 onMouseEnter={() => setHighlighted(idx)}
-                className={`px-3 py-1.5 cursor-pointer flex items-center justify-between text-xs ${idx === highlighted ? 'bg-primary-50 text-primary-700' : 'text-neutral-700 hover:bg-neutral-50'}`}
+                className={`px-2.5 py-1 cursor-pointer flex items-center justify-between text-xs ${idx === highlighted ? 'bg-primary-50 text-primary-700' : 'text-neutral-700 hover:bg-neutral-50'}`}
               >
-                <span className="font-medium truncate">{p.name}</span>
+                <span className="truncate">{p.name}</span>
                 <span className={`ml-2 shrink-0 text-[10px] font-semibold ${stock === 0 ? 'text-error-500' : stock <= (p.low_stock_alert ?? 5) ? 'text-warning-500' : 'text-success-600'}`}>
                   {stock}
                 </span>
