@@ -89,6 +89,9 @@ export async function createInvoice(
   deliveryChallanId: string,
   payload: CreateInvoicePayload,
 ): Promise<string> {
+  if (!deliveryChallanId) {
+    throw new Error('Create Delivery Challan before Invoice');
+  }
   const { data, error } = await supabase.rpc('create_invoice', {
     p_delivery_challan_id: deliveryChallanId,
     p_payload: payload,

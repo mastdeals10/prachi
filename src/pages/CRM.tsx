@@ -530,7 +530,7 @@ export default function CRM() {
       'Customer Score': c.customer_score || 0, 'Total Revenue': c.total_revenue || 0,
       'Next Followup': c.next_followup_date || '',
     }));
-    exportToCSV(data as Record<string, any>[], 'clients');
+    exportToCSV(data, 'clients');
   };
 
   const filtered = customers.filter(c => {

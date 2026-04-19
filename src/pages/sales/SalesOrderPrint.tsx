@@ -121,7 +121,7 @@ export default function SalesOrderPrint({ order, items, companyOverride, printMo
           </thead>
           <tbody>
             {b2bItems.map((item, idx) => (
-              <tr key={(item as Record<string,unknown>).id as string || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
+              <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
                 <td className="px-3 py-2.5 text-xs text-neutral-500 border-b border-neutral-100">{idx + 1}</td>
                 <td className="px-3 py-2.5 border-b border-neutral-100">
                   <p className="text-sm font-medium text-neutral-900">{item.product_name}</p>

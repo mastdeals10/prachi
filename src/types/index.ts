@@ -26,7 +26,7 @@ export interface Product {
 export interface ProductRecommendation {
   id: string;
   customer_id: string;
-  product_id?: string;
+  product_id?: string | null;
   product_name: string;
   direction?: string;
   recommended_quantity: number;
@@ -45,7 +45,7 @@ export interface StockMovement {
   reference_type?: string;
   reference_id?: string;
   reference_number?: string;
-  godown_id?: string;
+  godown_id?: string | null;
   notes?: string;
   created_at: string;
 }
@@ -63,6 +63,7 @@ export interface Supplier {
   state?: string;
   pincode?: string;
   gstin?: string;
+  notes?: string;
   opening_balance: number;
   balance: number;
   is_active: boolean;
@@ -252,6 +253,7 @@ export interface SalesOrderItem {
   unit: string;
   quantity: number;
   unit_price: number;
+  b2b_price?: number;
   discount_pct: number;
   total_price: number;
   godown_id?: string;

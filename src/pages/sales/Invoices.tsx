@@ -13,7 +13,7 @@ import { getCompanyById } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import { fetchGodowns } from '../../services/godownService';
 import { createInvoice, cancelInvoice } from '../../services/documentFlowService';
-import type { Invoice, Product, Customer, SalesOrder, DeliveryChallan, Godown } from '../../types';
+import type { Invoice, SalesOrder, SalesOrderItem, DeliveryChallan, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
 
@@ -34,6 +34,25 @@ interface LineItem {
 interface InvoicesProps {
   onNavigate?: (page: ActivePage, state?: PageState) => void;
   prefillFromDC?: DeliveryChallan;
+}
+
+interface ProductOption {
+  id: string;
+  name: string;
+  unit: string;
+  selling_price: number;
+}
+
+interface CustomerOption {
+  id: string;
+  name: string;
+  phone?: string;
+  alt_phone?: string;
+  address?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
 }
 
 export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: InvoicesProps) {
@@ -58,8 +77,8 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [viewItems, setViewItems] = useState<LineItem[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [godownStockMap, setGodownStockMap] = useState<Record<string, number>>({});
   const [availableDCs, setAvailableDCs] = useState<DeliveryChallan[]>([]);
@@ -68,7 +87,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const printRef = useRef<HTMLDivElement>(null);
   const [printCompany, setPrintCompany] = useState<Company | undefined>(undefined);
   const [printMode, setPrintMode] = useState<'normal' | 'b2b'>('normal');
-  const [shipToCustomer, setShipToCustomer] = useState<Customer | undefined>(undefined);
+  const [shipToCustomer, setShipToCustomer] = useState<CustomerOption | undefined>(undefined);
   const [b2bShipTo, setB2bShipTo] = useState<{ name: string; phone?: string; address?: string } | undefined>(undefined);
   const [b2bPriceMap, setB2bPriceMap] = useState<Record<string, number>>({});
 
@@ -110,7 +129,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   useEffect(() => {
     if (!prefillFromDC) return;
     const loadAndPrefill = async () => {
-      let soItems: SalesOrder['items'] = [];
+      let soItems: SalesOrderItem[] = [];
       let so: SalesOrder | null = null;
       if (prefillFromDC.sales_order_id) {
         const { data: soData } = await supabase
@@ -208,8 +227,8 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     ]);
     const invoiceList = invRes.data || [];
     setInvoices(invoiceList);
-    setProducts(productsRes.data || []);
-    setCustomers(customersRes.data || []);
+    setProducts((productsRes.data || []) as ProductOption[]);
+    setCustomers((customersRes.data || []) as CustomerOption[]);
     setGodowns(godownsData);
     if (godownsData.length > 0) {
       setForm(f => ({ ...f, godown_id: f.godown_id || godownsData[0].id }));
@@ -408,7 +427,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
 
   const handleSave = async () => {
     if (!form.delivery_challan_id) {
-      alert('An invoice must be created from a Delivery Challan. Please pick a DC.');
+      alert('Create Delivery Challan before Invoice');
       return;
     }
 

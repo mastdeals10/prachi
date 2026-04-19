@@ -259,32 +259,33 @@ export default function Inventory() {
 
     const isIn = ['purchase', 'return'].includes(mvType);
 
-    if (mvType === 'adjustment') {
-      const { data: row } = await supabase
-        .from('godown_stock')
-        .select('quantity')
-        .eq('product_id', selectedProduct.id)
-        .eq('godown_id', godownId)
-        .maybeSingle();
-      const current = row?.quantity || 0;
-      const delta = qty - current;
-      if (delta !== 0) {
+    try {
+      if (mvType === 'adjustment') {
+        const { data: row } = await supabase
+          .from('godown_stock')
+          .select('quantity')
+          .eq('product_id', selectedProduct.id)
+          .eq('godown_id', godownId)
+          .maybeSingle();
+        const current = row?.quantity || 0;
+        const delta = qty - current;
+        if (delta !== 0) {
+          await processStockMovement({
+            type: 'adjustment',
+            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: delta }],
+            reference_type: 'manual_adjustment',
+            notes: stockForm.notes,
+          });
+        }
+      } else {
+        const type = mvType === 'purchase' ? 'purchase' : mvType === 'return' ? 'return' : 'dispatch';
         await processStockMovement({
-          type: 'adjustment',
-          items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: delta }],
-          reference_type: 'manual_adjustment',
+          type,
+          items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
+          reference_type: 'manual_stock_update',
           notes: stockForm.notes,
         });
       }
-    } else {
-      const type = mvType === 'purchase' ? 'purchase' : mvType === 'return' ? 'return' : 'dispatch';
-      await processStockMovement({
-        type,
-        items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
-        reference_type: 'manual_stock_update',
-        notes: stockForm.notes,
-      });
-    }
 
     if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
       const updates: Record<string, any> = { updated_at: new Date().toISOString() };
@@ -294,11 +295,7 @@ export default function Inventory() {
       } else if (mvType !== 'adjustment') {
         updates.remaining_weight = Math.max(0, (selectedProduct.remaining_weight || 0) - qty);
       }
-      await supabase.from('products').update(updates).eq('id', selectedProduct.id);
     }
-
-    setShowStockModal(false);
-    loadData();
   };
 
   const handleExport = () => {
