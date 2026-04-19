@@ -45,12 +45,16 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const { email, password, displayName, role } = await req.json();
-    if (!email || !password || password.length < 6 || !displayName || !role) {
-      return new Response(JSON.stringify({ error: "email, password (min 6), displayName, and role are required" }), {
+    const body = await req.json();
+    const { username, email, password, role } = body;
+
+    if (!username || !email || !password || password.length < 6 || !role) {
+      return new Response(JSON.stringify({ error: "username, email, password (min 6), and role are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const normalizedUsername = username.trim().toLowerCase();
 
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -61,7 +65,7 @@ Deno.serve(async (req: Request) => {
       email,
       password,
       email_confirm: true,
-      user_metadata: { display_name: displayName, role },
+      user_metadata: { display_name: normalizedUsername, role },
     });
 
     if (createErr) {
@@ -73,7 +77,8 @@ Deno.serve(async (req: Request) => {
     const { error: profileErr } = await adminClient.from("user_profiles").upsert({
       id: newUser.user.id,
       email,
-      display_name: displayName,
+      username: normalizedUsername,
+      display_name: normalizedUsername,
       role,
     });
 
