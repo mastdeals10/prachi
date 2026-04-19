@@ -31,37 +31,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('user_profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
+    if (error) throw error;
     const resolvedProfile = data || null;
     setProfile(resolvedProfile);
     return resolvedProfile;
   };
 
   useEffect(() => {
+    let initialized = false;
+
     const initializeAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      } else {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          try {
+            await fetchProfile(session.user.id);
+          } catch {
+            setProfile(null);
+          }
+        } else {
+          setProfile(null);
+        }
+      } catch {
+        setSession(null);
+        setUser(null);
         setProfile(null);
+      } finally {
+        initialized = true;
+        setIsAuthLoading(false);
       }
-      setIsAuthLoading(false);
     };
 
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!initialized) return;
       setIsAuthLoading(true);
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        await fetchProfile(session.user.id);
+        try {
+          await fetchProfile(session.user.id);
+        } catch {
+          setProfile(null);
+        }
       } else {
         setProfile(null);
       }
