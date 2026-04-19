@@ -60,7 +60,7 @@ function AppShell() {
   const [activePage, setActivePage] = useState<ActivePage>('dashboard');
   const [pageState, setPageState] = useState<PageState>({});
 
-  if (isAuthLoading) return <AppLoader />;
+  if (isAuthLoading && !user) return <AppLoader />;
 
   if (!user) return <Login />;
 
