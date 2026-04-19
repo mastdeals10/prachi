@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X } from 'lucide-react';
+import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,6 +29,7 @@ export default function Inventory() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [confirmProduct, setConfirmProduct] = useState<Product | null>(null);
+  const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [openingStocks, setOpeningStocks] = useState<Record<string, string>>({});
@@ -52,6 +53,12 @@ export default function Inventory() {
   const [imagePreview, setImagePreview] = useState<string>('');
 
   useEffect(() => { loadData(); fetchCompanies().then(setCompanies); }, []);
+  useEffect(() => {
+    if (!openRowMenu) return;
+    const handler = () => setOpenRowMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openRowMenu]);
 
   useEffect(() => {
     let data = products;
@@ -161,62 +168,68 @@ export default function Inventory() {
       weight_grams: form.is_gemstone && form.weight_grams ? parseFloat(form.weight_grams) || null : null,
       total_weight: totalW,
       weight_unit: form.is_gemstone ? form.weight_unit : null,
+      company_id: form.company_id || null,
       updated_at: new Date().toISOString(),
     };
-    if (editing) {
-      const { error: productErr } = await supabase.from('products').update(basePayload).eq('id', editing.id);
-      if (productErr) throw productErr;
+    try {
+      if (editing) {
+        const { error: productErr } = await supabase.from('products').update(basePayload).eq('id', editing.id);
+        if (productErr) throw productErr;
 
-      const { data: currentStocks, error: currentErr } = await supabase
-        .from('godown_stock')
-        .select('godown_id, quantity')
-        .eq('product_id', editing.id);
-      if (currentErr) throw currentErr;
-      const currentMap: Record<string, number> = {};
-      (currentStocks || []).forEach(s => { currentMap[s.godown_id] = s.quantity || 0; });
+        const { data: currentStocks, error: currentErr } = await supabase
+          .from('godown_stock')
+          .select('godown_id, quantity')
+          .eq('product_id', editing.id);
+        if (currentErr) throw currentErr;
+        const currentMap: Record<string, number> = {};
+        (currentStocks || []).forEach(s => { currentMap[s.godown_id] = s.quantity || 0; });
 
-      const adjustItems = Object.entries(editGodownStocks)
-        .map(([godown_id, qtyStr]) => {
-          const target = parseFloat(qtyStr) || 0;
-          const current = currentMap[godown_id] || 0;
-          return { product_id: editing.id, godown_id, quantity: target - current };
-        })
-        .filter(i => i.quantity !== 0);
+        const adjustItems = Object.entries(editGodownStocks)
+          .map(([godown_id, qtyStr]) => {
+            const target = parseFloat(qtyStr) || 0;
+            const current = currentMap[godown_id] || 0;
+            return { product_id: editing.id, godown_id, quantity: target - current };
+          })
+          .filter(i => i.quantity !== 0);
 
-      if (adjustItems.length > 0) {
-        await processStockMovement({
-          type: 'adjustment',
-          items: adjustItems,
-          reference_type: 'stock_edit',
-          reference_id: editing.id,
-          notes: 'Manual stock edit',
-        });
-      }
-    } else {
-      const createPayload = { ...basePayload, remaining_weight: totalW };
-      const { data: newProduct, error: insertErr } = await supabase.from('products').insert(createPayload).select().maybeSingle();
-      if (insertErr) throw insertErr;
-      if (newProduct) {
-        const openingItems = Object.entries(openingStocks)
-          .map(([godown_id, qtyStr]) => ({
-            product_id: newProduct.id,
-            godown_id,
-            quantity: parseFloat(qtyStr) || 0,
-          }))
-          .filter(i => i.quantity > 0);
-        if (openingItems.length > 0) {
+        if (adjustItems.length > 0) {
           await processStockMovement({
             type: 'adjustment',
-            items: openingItems,
-            reference_type: 'opening_stock',
-            reference_id: newProduct.id,
-            notes: 'Opening stock',
+            items: adjustItems,
+            reference_type: 'stock_edit',
+            reference_id: editing.id,
+            notes: 'Manual stock edit',
           });
         }
+      } else {
+        const createPayload = { ...basePayload, remaining_weight: totalW };
+        const { data: newProduct, error: insertErr } = await supabase.from('products').insert(createPayload).select().maybeSingle();
+        if (insertErr) throw insertErr;
+        if (newProduct) {
+          const openingItems = Object.entries(openingStocks)
+            .map(([godown_id, qtyStr]) => ({
+              product_id: newProduct.id,
+              godown_id,
+              quantity: parseFloat(qtyStr) || 0,
+            }))
+            .filter(i => i.quantity > 0);
+          if (openingItems.length > 0) {
+            await processStockMovement({
+              type: 'adjustment',
+              items: openingItems,
+              reference_type: 'opening_stock',
+              reference_id: newProduct.id,
+              notes: 'Opening stock',
+            });
+          }
+        }
       }
+      setShowModal(false);
+      loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Save failed: ${msg}`);
     }
-    setShowModal(false);
-    loadData();
   };
 
   const handleDelete = async (p: Product) => {
@@ -396,8 +409,8 @@ export default function Inventory() {
               {filtered.map(p => {
                 const bar = getStockBar(p);
                 return (
-                  <tr key={p.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
-                    <td className="table-cell">
+                  <tr key={p.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
+                    <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
                         {p.image_url ? (
                           <img src={p.image_url} alt={p.name} className="w-8 h-8 rounded-lg object-cover flex-shrink-0 border border-neutral-100" />
@@ -412,18 +425,18 @@ export default function Inventory() {
                         </div>
                       </div>
                     </td>
-                    <td className="table-cell">
+                    <td className="py-3 px-3">
                       <span className={`badge text-[10px] font-semibold uppercase tracking-wider ${getCategoryColor(p.category)}`}>{p.category}</span>
                       {p.company_id && companies.find(c => c.id === p.company_id) && (
                         <span className="badge text-[10px] bg-blue-50 text-blue-700 ml-1">{companies.find(c => c.id === p.company_id)!.name}</span>
                       )}
                     </td>
-                    <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
-                    <td className="table-cell">
+                    <td className="py-3 px-3 text-xs text-neutral-500">{p.unit}</td>
+                    <td className="py-3 px-3">
                       {isAdmin && <p className="text-[10px] text-neutral-400">P: {formatCurrency(p.purchase_price)}</p>}
                       <p className="text-xs font-semibold text-primary-700">S: {formatCurrency(p.selling_price)}</p>
                     </td>
-                    <td className="table-cell">
+                    <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
                           <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${bar.pct}%` }} />

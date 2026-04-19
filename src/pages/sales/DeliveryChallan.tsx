@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X } from 'lucide-react';
+import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X, MoreVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import { getSmartRate } from '../../lib/rateCardService';
@@ -63,9 +63,11 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [viewChallan, setViewChallan] = useState<DCType | null>(null);
   const [viewItems, setViewItems] = useState<ChallanItem[]>([]);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [challanPrintMode, setChallanPrintMode] = useState<'normal' | 'b2b'>('normal');
 
   const [deleteTarget, setDeleteTarget] = useState<DCType | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [loadingSO, setLoadingSO] = useState(false);
   const [printCompany, setPrintCompany] = useState<Company | undefined>(undefined);
   const [godowns, setGodowns] = useState<{id: string; name: string}[]>([]);
@@ -74,6 +76,12 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    if (!openRowMenu) return;
+    const handler = () => setOpenRowMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openRowMenu]);
 
   const loadData = async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -81,7 +89,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       supabase.from('delivery_challans').select('id, challan_number, sales_order_id, customer_id, customer_name, customer_phone, customer_address, customer_address2, customer_city, customer_state, customer_pincode, is_b2b, ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, challan_date, dispatch_mode, courier_company, tracking_number, status, notes, company_id, created_at').gte('challan_date', thirtyDaysAgo).order('created_at', { ascending: false }).limit(200),
       supabase.from('products').select('id, name, unit, selling_price, company_id').eq('is_active', true),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
-      supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status').order('created_at', { ascending: false }).limit(500),
+      supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status, is_b2b').order('created_at', { ascending: false }).limit(500),
       supabase.from('godowns').select('id, name').eq('is_active', true).order('name'),
     ]);
     const allChallans = challansRes.data || [];
@@ -90,8 +98,8 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     setCustomers(customersRes.data || []);
     setGodowns(godownsRes.data || []);
     const allSOs = (soRes.data || []) as SalesOrder[];
-    const soMap: Record<string, string> = {};
-    allSOs.forEach(so => { soMap[so.id] = so.so_number; });
+    const soMap: Record<string, { so_number: string; is_b2b: boolean }> = {};
+    allSOs.forEach(so => { soMap[so.id] = { so_number: so.so_number, is_b2b: !!(so as Record<string,unknown>).is_b2b }; });
     setSoNumberMap(soMap);
     const linkedSOIds = new Set(allChallans.filter(c => c.sales_order_id && c.status !== 'cancelled').map(c => c.sales_order_id));
     setSalesOrders(allSOs.filter(so => ['confirmed', 'dispatched', 'delivered'].includes(so.status) && !linkedSOIds.has(so.id)));
@@ -260,7 +268,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     loadData();
   };
 
-  const [soNumberMap, setSoNumberMap] = useState<Record<string, string>>({});
+  const [soNumberMap, setSoNumberMap] = useState<Record<string, { so_number: string; is_b2b: boolean }>>({});
   const [showSOSelectModal, setShowSOSelectModal] = useState(false);
   const [soSelectSearch, setSoSelectSearch] = useState('');
   const [editingSOs, setEditingSOs] = useState<SalesOrder[]>([]);
@@ -326,7 +334,28 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
 
   const openView = async (dc: DCType) => {
     const { data: itemsData } = await supabase.from('delivery_challan_items').select('*').eq('delivery_challan_id', dc.id);
-    setViewChallan({ ...dc, items: (itemsData || []) as ChallanItem[] });
+    let enrichedDC = { ...dc, items: (itemsData || []) as ChallanItem[] };
+
+    const isB2B = dc.is_b2b || (dc.sales_order_id && soNumberMap[dc.sales_order_id]?.is_b2b);
+    if (isB2B && dc.sales_order_id && (!dc.ship_to_name)) {
+      const { data: so } = await supabase
+        .from('sales_orders')
+        .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, ship_to_customer_id')
+        .eq('id', dc.sales_order_id)
+        .maybeSingle();
+      if (so) {
+        if (so.ship_to_name) {
+          enrichedDC = { ...enrichedDC, ship_to_name: so.ship_to_name, ship_to_phone: so.ship_to_phone, ship_to_address1: so.ship_to_address1, ship_to_address2: so.ship_to_address2, ship_to_city: so.ship_to_city, ship_to_state: so.ship_to_state, ship_to_pin: so.ship_to_pin, is_b2b: true };
+        } else if (so.ship_to_customer_id) {
+          const { data: cust } = await supabase.from('customers').select('name, phone, address, address2, city, state, pincode').eq('id', so.ship_to_customer_id).maybeSingle();
+          if (cust) {
+            enrichedDC = { ...enrichedDC, ship_to_name: cust.name, ship_to_phone: cust.phone, ship_to_address1: cust.address, ship_to_address2: cust.address2 || '', ship_to_city: cust.city, ship_to_state: cust.state, ship_to_pin: cust.pincode, is_b2b: true };
+          }
+        }
+      }
+    }
+
+    setViewChallan(enrichedDC);
     setViewItems((itemsData || []) as ChallanItem[]);
     const dcWithCompany = dc as DCType & { company_id?: string };
     let coId = dcWithCompany.company_id || null;
@@ -360,10 +389,30 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     }
   };
 
-  const openPrint = async (dc: DCType) => {
+  const openPrint = async (dc: DCType, mode: 'normal' | 'b2b' = 'normal') => {
     const { data: itemsData } = await supabase.from('delivery_challan_items').select('*').eq('delivery_challan_id', dc.id);
-    setSelectedChallan({ ...dc, items: itemsData || [] });
-    // Detect company from first product that has one
+    let enrichedDC = { ...dc, items: itemsData || [] };
+
+    if (mode === 'b2b' && dc.sales_order_id && (!dc.ship_to_name)) {
+      const { data: so } = await supabase
+        .from('sales_orders')
+        .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, ship_to_customer_id')
+        .eq('id', dc.sales_order_id)
+        .maybeSingle();
+      if (so) {
+        if (so.ship_to_name) {
+          enrichedDC = { ...enrichedDC, ship_to_name: so.ship_to_name, ship_to_phone: so.ship_to_phone, ship_to_address1: so.ship_to_address1, ship_to_address2: so.ship_to_address2, ship_to_city: so.ship_to_city, ship_to_state: so.ship_to_state, ship_to_pin: so.ship_to_pin, is_b2b: true };
+        } else if (so.ship_to_customer_id) {
+          const { data: cust } = await supabase.from('customers').select('name, phone, address, address2, city, state, pincode').eq('id', so.ship_to_customer_id).maybeSingle();
+          if (cust) {
+            enrichedDC = { ...enrichedDC, ship_to_name: cust.name, ship_to_phone: cust.phone, ship_to_address1: cust.address, ship_to_address2: cust.address2 || '', ship_to_city: cust.city, ship_to_state: cust.state, ship_to_pin: cust.pincode, is_b2b: true };
+          }
+        }
+      }
+    }
+
+    setSelectedChallan(enrichedDC);
+    setChallanPrintMode(mode);
     const dcWithCompany = dc as DCType & { company_id?: string };
     let coId = dcWithCompany.company_id || null;
     if (!coId && itemsData && itemsData.length > 0) {
@@ -474,32 +523,33 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                   </thead>
                   <tbody>
                     {groupItems.map(dc => (
-                      <tr key={dc.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                        <td className="table-cell font-medium text-xs">
+                      <tr key={dc.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors">
+                        <td className="py-3 px-3 font-medium text-xs">
                           {dc.challan_number.startsWith('LEGACY-DC-') ? (
                             <span className="text-neutral-400 italic text-[11px]">Legacy (pre-system)</span>
                           ) : (
                             <span className="text-primary-700">{dc.challan_number}</span>
                           )}
-                          {dc.is_b2b && <span className="ml-1.5 text-[9px] font-bold bg-blue-100 text-blue-700 px-1 py-0.5 rounded uppercase">B2B</span>}
+                          {dc.is_b2b && <span className="ml-1.5 text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full uppercase tracking-wider">B2B</span>}
                         </td>
-                        <td className="table-cell">
-                          <p className="font-medium text-sm">{dc.customer_name}</p>
-                          {dc.customer_phone && <p className="text-xs text-neutral-400">{dc.customer_phone}</p>}
+                        <td className="py-3 px-3">
+                          <p className="font-medium text-sm text-neutral-900">{dc.customer_name}</p>
+                          {dc.customer_phone && <p className="text-xs text-neutral-400 mt-0.5">{dc.customer_phone}</p>}
                         </td>
-                        <td className="table-cell">
+                        <td className="py-3 px-3">
                           {dc.sales_order_id ? (
-                            <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
-                              {soNumberMap[dc.sales_order_id] || 'SO Linked'}
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${soNumberMap[dc.sales_order_id]?.is_b2b ? 'bg-blue-100 text-blue-800' : 'bg-blue-50 text-blue-700'}`}>
+                              {soNumberMap[dc.sales_order_id]?.so_number || 'SO Linked'}
+                              {soNumberMap[dc.sales_order_id]?.is_b2b && <span className="text-[9px] font-bold uppercase">(b2b)</span>}
                             </span>
                           ) : <span className="text-neutral-300 text-xs">—</span>}
                         </td>
-                        <td className="table-cell text-neutral-500 text-sm">{formatDate(dc.challan_date)}</td>
-                        <td className="table-cell text-neutral-600 text-sm">{dc.courier_company || dc.dispatch_mode || '—'}</td>
-                        <td className="table-cell">
+                        <td className="py-3 px-3 text-sm text-neutral-500">{formatDate(dc.challan_date)}</td>
+                        <td className="py-3 px-3 text-sm text-neutral-600">{dc.courier_company || dc.dispatch_mode || '—'}</td>
+                        <td className="py-3 px-3">
                           {dc.tracking_number ? (
                             <span className="text-xs font-mono bg-neutral-100 px-2 py-0.5 rounded">{dc.tracking_number}</span>
-                          ) : <span className="text-neutral-400 text-xs">-</span>}
+                          ) : <span className="text-neutral-400 text-xs">—</span>}
                         </td>
                         <td className="table-cell text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -516,7 +566,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                               </button>
                             )}
                             <button onClick={() => openView(dc)} title="View" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => openPrint(dc)} title="Print" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => openPrint(dc, 'normal')} title="Print Challan" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
                             {dc.status !== 'delivered' && dc.status !== 'cancelled' && (
                               <button onClick={() => openEdit(dc)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
                             )}
@@ -688,22 +738,23 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           <div className="flex items-center gap-2 w-full">
             <div className="flex items-center gap-2">
               <StatusBadge status={viewChallan?.status || ''} />
-              {viewChallan?.sales_order_id && (
-                <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium">
-                  SO: {soNumberMap[viewChallan.sales_order_id] || '—'}
-                </span>
-              )}
-              {viewChallan?.is_b2b && (
-                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">B2B</span>
-              )}
+              {viewChallan?.sales_order_id && (() => {
+                const soInfo = soNumberMap[viewChallan.sales_order_id];
+                const isB2B = viewChallan.is_b2b || soInfo?.is_b2b;
+                return (
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${isB2B ? 'bg-blue-100 text-blue-800' : 'bg-blue-50 text-blue-700'}`}>
+                    {soInfo?.so_number || '—'}{isB2B ? ' (b2b)' : ''}
+                  </span>
+                );
+              })()}
             </div>
             <div className="ml-auto flex gap-2">
-              {viewChallan?.is_b2b && (
-                <button onClick={() => { if (viewChallan) { setShowViewModal(false); openPrint(viewChallan); } }} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+              {(viewChallan?.is_b2b || (viewChallan?.sales_order_id && soNumberMap[viewChallan.sales_order_id]?.is_b2b)) && (
+                <button onClick={() => { if (viewChallan) { setShowViewModal(false); openPrint(viewChallan, 'b2b'); } }} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
                   <Printer className="w-3.5 h-3.5" /> Print B2B
                 </button>
               )}
-              <button onClick={() => { if (viewChallan) { setShowViewModal(false); openPrint(viewChallan); } }} className="flex items-center gap-1.5 btn-secondary text-xs">
+              <button onClick={() => { if (viewChallan) { setShowViewModal(false); openPrint(viewChallan, 'normal'); } }} className="flex items-center gap-1.5 btn-secondary text-xs">
                 <Printer className="w-3.5 h-3.5" /> Print Challan
               </button>
               <button onClick={() => { setShowViewModal(false); setViewChallan(null); }} className="btn-primary">Close</button>
@@ -711,7 +762,11 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           </div>
         }>
         {viewChallan && (
-          <ChallanPrint challan={viewChallan} companyOverride={printCompany} />
+          <ChallanPrint
+            challan={viewChallan}
+            companyOverride={printCompany}
+            printMode="normal"
+          />
         )}
       </Modal>
 
@@ -789,13 +844,16 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       {showPrint && selectedChallan && (
         <div className="fixed inset-0 z-50 bg-neutral-100 overflow-auto">
           <div className="no-print flex items-center justify-between bg-white border-b border-neutral-200 px-6 py-3">
-            <p className="text-sm font-semibold">Challan Preview - {selectedChallan.challan_number}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold">{challanPrintMode === 'b2b' ? 'B2B Challan Preview' : 'Challan Preview'} - {selectedChallan.challan_number}</p>
+              {challanPrintMode === 'b2b' && <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-full uppercase tracking-wider">B2B</span>}
+            </div>
             <div className="flex gap-2">
               <button onClick={() => window.print()} className="btn-primary"><Printer className="w-4 h-4" /> Print</button>
               <button onClick={() => setShowPrint(false)} className="btn-secondary">Close</button>
             </div>
           </div>
-          <div className="py-6 print-content"><ChallanPrint challan={selectedChallan} companyOverride={printCompany} /></div>
+          <div className="py-6 print-content"><ChallanPrint challan={selectedChallan} companyOverride={printCompany} printMode={challanPrintMode} /></div>
         </div>
       )}
     </div>

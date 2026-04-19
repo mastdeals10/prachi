@@ -7,6 +7,7 @@ export type UserRole = 'admin' | 'staff' | 'accountant' | 'user';
 interface UserProfile {
   id: string;
   role: UserRole;
+  username: string;
   display_name: string;
   email: string;
 }
@@ -24,7 +25,7 @@ interface AuthContextType {
   canAccessSales: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, displayName: string, role: UserRole) => Promise<{ error: string | null }>;
+  signUp: (username: string, password: string, role: UserRole) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -72,9 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error?.message ?? null };
   };
 
-  const signUp = async (email: string, password: string, displayName: string, role: UserRole) => {
+  const signUp = async (username: string, password: string, role: UserRole) => {
     const { data: { session: currentSession } } = await supabase.auth.getSession();
     if (!currentSession?.access_token) return { error: 'Not authenticated. Please reload.' };
+
+    const normalizedUsername = username.trim().toLowerCase();
+    const email = `${normalizedUsername}@prachifulagar.app`;
 
     const res = await fetch(
       `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`,
@@ -84,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentSession.access_token}`,
         },
-        body: JSON.stringify({ email, password, displayName, role }),
+        body: JSON.stringify({ username: normalizedUsername, email, password, role }),
       }
     );
     const json = await res.json();

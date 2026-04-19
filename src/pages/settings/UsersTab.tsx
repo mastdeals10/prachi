@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Pencil, CheckCircle, Save, RefreshCw, Shield, User, Users as UsersIcon } from 'lucide-react';
+import { Plus, Pencil, CheckCircle, Save, Shield, User, Users as UsersIcon } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import type { UserRole } from '../../contexts/AuthContext';
@@ -7,6 +7,7 @@ import type { UserRole } from '../../contexts/AuthContext';
 interface UserProfile {
   id: string;
   email: string;
+  username: string;
   display_name: string;
   role: UserRole;
   last_sign_in?: string;
@@ -34,12 +35,10 @@ export default function UsersTab() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', role: 'staff' as UserRole });
+  const [addForm, setAddForm] = useState({ username: '', password: '', role: 'staff' as UserRole });
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
   const [addSuccess, setAddSuccess] = useState('');
-  const [resetEmail, setResetEmail] = useState<string | null>(null);
-  const [resetSent, setResetSent] = useState(false);
   const [changePwdId, setChangePwdId] = useState<string | null>(null);
   const [newPwd, setNewPwd] = useState('');
   const [changingPwd, setChangingPwd] = useState(false);
@@ -66,28 +65,24 @@ export default function UsersTab() {
 
   const handleAdd = async () => {
     setAddError('');
-    if (!addForm.name.trim() || !addForm.email.trim() || addForm.password.length < 6) {
-      setAddError('Name, email, and a password (min 6 chars) are required.');
+    const username = addForm.username.trim().toLowerCase();
+    if (!username || addForm.password.length < 6) {
+      setAddError('Username and a password (min 6 chars) are required.');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(username)) {
+      setAddError('Username can only contain letters, numbers, and underscores.');
       return;
     }
     setAdding(true);
-    const { error } = await signUp(addForm.email.trim(), addForm.password, addForm.name.trim(), addForm.role);
+    const { error } = await signUp(username, addForm.password, addForm.role);
     setAdding(false);
     if (error) { setAddError(error); return; }
-    setAddSuccess(`${addForm.name} added successfully!`);
-    setAddForm({ name: '', email: '', password: '', role: 'staff' });
+    setAddSuccess(`${username} added successfully!`);
+    setAddForm({ username: '', password: '', role: 'staff' });
     setShowAdd(false);
     await loadUsers();
     setTimeout(() => setAddSuccess(''), 4000);
-  };
-
-  const sendReset = async (email: string) => {
-    setResetEmail(email);
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + '/reset-password',
-    });
-    setResetSent(true);
-    setTimeout(() => { setResetEmail(null); setResetSent(false); }, 4000);
   };
 
   const changePassword = async (userId: string) => {
@@ -159,22 +154,25 @@ export default function UsersTab() {
           <p className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5 text-primary-600" /> New User</p>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="label">Display Name *</label>
-              <input value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} className="input" placeholder="Nikhil" />
-            </div>
-            <div>
-              <label className="label">Email *</label>
-              <input type="email" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} className="input" placeholder="nikhil@example.com" />
-            </div>
-            <div>
-              <label className="label">Password *</label>
-              <input type="password" value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} className="input" placeholder="Min 6 characters" />
+              <label className="label">Username *</label>
+              <input
+                value={addForm.username}
+                onChange={e => setAddForm(f => ({ ...f, username: e.target.value.toLowerCase() }))}
+                className="input"
+                placeholder="nikhil"
+                autoComplete="off"
+              />
+              <p className="text-[10px] text-neutral-400 mt-0.5">Lowercase only. Used to log in.</p>
             </div>
             <div>
               <label className="label">Role</label>
               <select value={addForm.role} onChange={e => setAddForm(f => ({ ...f, role: e.target.value as UserRole }))} className="input">
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label} — {r.desc.split(' ').slice(0, 3).join(' ')}...</option>)}
               </select>
+            </div>
+            <div className="col-span-2">
+              <label className="label">Password *</label>
+              <input type="password" value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} className="input" placeholder="Min 6 characters" />
             </div>
           </div>
           {addError && <p className="text-xs text-error-600 font-medium">{addError}</p>}
@@ -195,15 +193,15 @@ export default function UsersTab() {
               {/* Avatar */}
               <div className="w-9 h-9 rounded-full bg-primary-100 flex items-center justify-center shrink-0">
                 <span className="text-xs font-bold text-primary-700">
-                  {(u.display_name || u.email || 'U')[0].toUpperCase()}
+                  {(u.username || u.display_name || 'U')[0].toUpperCase()}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-neutral-900">{u.display_name || '—'}</p>
+                  <p className="text-sm font-semibold text-neutral-900">{u.username || u.display_name || '—'}</p>
                   {u.id === myProfile?.id && <span className="text-[9px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded font-bold">You</span>}
                 </div>
-                <p className="text-xs text-neutral-400">{u.email}</p>
+                <p className="text-xs text-neutral-400">{u.display_name && u.display_name !== u.username ? u.display_name : u.email}</p>
               </div>
 
               {/* Role badge or edit */}
@@ -226,14 +224,6 @@ export default function UsersTab() {
                       <Pencil className="w-3 h-3" />
                     </button>
                   )}
-                  <button
-                    onClick={() => sendReset(u.email)}
-                    disabled={resetEmail === u.email}
-                    title="Send password reset email"
-                    className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                  >
-                    {resetEmail === u.email && resetSent ? <CheckCircle className="w-3 h-3 text-success-500" /> : <RefreshCw className="w-3 h-3" />}
-                  </button>
                   {pwdDone === u.id
                     ? <CheckCircle className="w-4 h-4 text-success-500" />
                     : <button onClick={() => { setChangePwdId(changePwdId === u.id ? null : u.id); setNewPwd(''); setPwdError(''); }}
@@ -250,7 +240,7 @@ export default function UsersTab() {
             {changePwdId === u.id && (
               <div className="mt-3 border-t border-neutral-100 pt-3">
                 <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide mb-2">
-                  {u.id === myProfile?.id ? 'Change Your Password' : `Set Password for ${u.display_name}`}
+                  {u.id === myProfile?.id ? 'Change Your Password' : `Set Password for ${u.username || u.display_name}`}
                 </p>
                 <div className="flex items-center gap-2">
                   <input

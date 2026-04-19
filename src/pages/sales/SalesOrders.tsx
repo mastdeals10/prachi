@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight, XCircle, X } from 'lucide-react';
+import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight, XCircle, X, MoreVertical } from 'lucide-react';
 import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase';
@@ -64,6 +64,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
   const [cancelSOTarget, setCancelSOTarget] = useState<SalesOrder | null>(null);
+  const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
 
   const customerSelectRef = useRef<HTMLSelectElement>(null);
   const shipToNameRef = useRef<HTMLInputElement>(null);
@@ -121,6 +122,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [showModal]);
+
+  useEffect(() => {
+    if (!openRowMenu) return;
+    const handler = () => setOpenRowMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openRowMenu]);
 
   const loadData = async () => {
     const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
@@ -759,7 +767,6 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 <th className="table-header text-left">SO #</th>
                 <th className="table-header text-left">Customer</th>
                 <th className="table-header text-left">Date</th>
-                <th className="table-header text-left">Delivery</th>
                 <th className="table-header text-right">Amount</th>
                 <th className="table-header text-left">Status</th>
                 <th className="table-header text-right">Actions</th>
@@ -768,23 +775,23 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             <tbody>
               {filtered.map(o => (
                 <React.Fragment key={o.id}>
-                  <tr className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                    <td className="table-cell w-8">
+                  <tr className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors">
+                    <td className="py-3 px-3 w-8">
                       <button onClick={() => toggleExpand(o.id)} className="w-6 h-6 flex items-center justify-center rounded hover:bg-neutral-200">
                         {expandedRows.has(o.id) ? <ChevronDown className="w-3.5 h-3.5 text-neutral-500" /> : <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />}
                       </button>
                     </td>
-                    <td className="table-cell font-medium text-primary-700">{o.so_number}</td>
+                    <td className="table-cell font-medium text-primary-700 text-xs">{o.so_number}</td>
                     <td className="table-cell">
-                      <p className="font-medium">{o.customer_name}</p>
-                      <p className="text-xs text-neutral-400">{o.customer_phone}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-medium text-neutral-800">{o.customer_name}</p>
+                        {o.is_b2b && <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full uppercase tracking-wider">B2B</span>}
+                      </div>
+                      {o.customer_phone && <p className="text-[10px] text-neutral-400 mt-0.5">{o.customer_phone}</p>}
                     </td>
-                    <td className="table-cell text-neutral-500">{formatDate(o.so_date)}</td>
-                    <td className="table-cell text-neutral-500">{o.delivery_date ? formatDate(o.delivery_date) : '-'}</td>
-                    <td className="table-cell text-right font-semibold">{formatCurrency(o.total_amount)}</td>
-                    <td className="table-cell">
-                      <span className={`text-xs font-semibold capitalize ${statusColors[o.status] || 'text-neutral-500'}`}>{o.status}</span>
-                    </td>
+                    <td className="table-cell text-xs text-neutral-500">{formatDate(o.so_date)}</td>
+                    <td className="table-cell text-right text-xs font-semibold text-neutral-800">{formatCurrency(o.total_amount)}</td>
+                    <td className="table-cell"><StatusBadge status={o.status} /></td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1">
                         {(o.status === 'confirmed' || o.status === 'draft') && (
@@ -812,7 +819,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                   </tr>
                   {expandedRows.has(o.id) && (
                     <tr key={`${o.id}-items`} className="bg-neutral-50 border-b border-neutral-100">
-                      <td colSpan={8} className="px-10 py-3">
+                      <td colSpan={7} className="px-10 py-3">
                         {rowItems[o.id] ? (
                           <table className="w-full text-xs">
                             <thead>
@@ -1090,7 +1097,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           </div>
         }>
         {viewOrder && (
-          <SalesOrderPrint order={viewOrder} items={viewItems as SalesOrderItem[]} companyOverride={printCompany} printMode="normal" />
+          <SalesOrderPrint order={viewOrder} items={viewItems as SalesOrderItem[]} companyOverride={printCompany} printMode={viewOrder.is_b2b ? 'b2b' : 'normal'} />
         )}
       </Modal>
 

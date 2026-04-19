@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, ChevronDown, Truck } from 'lucide-react';
+import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, ChevronDown, Truck, MoreVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
@@ -188,6 +188,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   }, [prefillFromDC, godowns]);
 
   const [soMap, setSoMap] = useState<Record<string, string>>({});
+  const [soIsB2bMap, setSoIsB2bMap] = useState<Record<string, boolean>>({});
   const [dcMap, setDcMap] = useState<Record<string, string>>({});
   const [dcIsB2bMap, setDcIsB2bMap] = useState<Record<string, boolean>>({});
 
@@ -202,7 +203,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
       supabase.from('customers').select('id, name, phone, alt_phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       fetchGodowns(),
-      supabase.from('sales_orders').select('id, so_number').order('created_at', { ascending: false }).limit(500),
+      supabase.from('sales_orders').select('id, so_number, is_b2b').order('created_at', { ascending: false }).limit(500),
       supabase.from('delivery_challans').select('id, challan_number, is_b2b').order('created_at', { ascending: false }).limit(500),
     ]);
     const invoiceList = invRes.data || [];
@@ -214,8 +215,13 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       setForm(f => ({ ...f, godown_id: f.godown_id || godownsData[0].id }));
     }
     const sm: Record<string, string> = {};
-    (soRes.data || []).forEach((s: { id: string; so_number: string }) => { sm[s.id] = s.so_number; });
+    const soB2b: Record<string, boolean> = {};
+    (soRes.data || []).forEach((s: { id: string; so_number: string; is_b2b?: boolean }) => {
+      sm[s.id] = s.so_number;
+      if (s.is_b2b) soB2b[s.id] = true;
+    });
     setSoMap(sm);
+    setSoIsB2bMap(soB2b);
     const dm: Record<string, string> = {};
     const b2b: Record<string, boolean> = {};
     (dcRes.data || []).forEach((d: { id: string; challan_number: string; is_b2b?: boolean }) => {
@@ -573,8 +579,26 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     if (mode === 'b2b') {
       let soId = inv.sales_order_id;
 
+      const resolveShipTo = async (soIdToCheck: string) => {
+        const { data: so } = await supabase
+          .from('sales_orders')
+          .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, ship_to_customer_id')
+          .eq('id', soIdToCheck)
+          .maybeSingle();
+        if (so?.ship_to_name) {
+          const addrParts = [so.ship_to_address1, so.ship_to_address2, so.ship_to_city, so.ship_to_state, so.ship_to_pin].filter(Boolean);
+          setB2bShipTo({ name: so.ship_to_name, phone: so.ship_to_phone || '', address: addrParts.join(', ') });
+        } else if (so?.ship_to_customer_id) {
+          const { data: shipCust } = await supabase
+            .from('customers')
+            .select('id, name, phone, address, address2, city, state, pincode')
+            .eq('id', so.ship_to_customer_id)
+            .maybeSingle();
+          setShipToCustomer(shipCust || undefined);
+        }
+      };
+
       if (inv.delivery_challan_id) {
-        // Prefer DC's ship_to fields (copied from SO at DC creation time)
         const { data: dc } = await supabase
           .from('delivery_challans')
           .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, ship_to_customer_id, sales_order_id')
@@ -591,28 +615,14 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
             .eq('id', dc.ship_to_customer_id)
             .maybeSingle();
           setShipToCustomer(shipCust || undefined);
+        } else {
+          const fallbackSoId = dc?.sales_order_id || soId;
+          if (fallbackSoId) await resolveShipTo(fallbackSoId);
         }
 
         if (dc?.sales_order_id) soId = dc.sales_order_id;
       } else if (inv.sales_order_id) {
-        // Legacy path: no DC link, read ship_to from SO directly
-        const { data: so } = await supabase
-          .from('sales_orders')
-          .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, ship_to_customer_id')
-          .eq('id', inv.sales_order_id)
-          .maybeSingle();
-
-        if (so?.ship_to_name) {
-          const addrParts = [so.ship_to_address1, so.ship_to_address2, so.ship_to_city, so.ship_to_state, so.ship_to_pin].filter(Boolean);
-          setB2bShipTo({ name: so.ship_to_name, phone: so.ship_to_phone || '', address: addrParts.join(', ') });
-        } else if (so?.ship_to_customer_id) {
-          const { data: shipCust } = await supabase
-            .from('customers')
-            .select('id, name, phone, address, address2, city, state, pincode')
-            .eq('id', so.ship_to_customer_id)
-            .maybeSingle();
-          setShipToCustomer(shipCust || undefined);
-        }
+        await resolveShipTo(inv.sales_order_id);
       }
 
       if (soId) {
@@ -855,23 +865,34 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                 const isOverdue = inv.status === 'overdue';
                 const isCancelled = inv.status === 'cancelled';
                 return (
-                  <tr key={inv.id} className={`border-b border-neutral-50 hover:bg-neutral-50 transition-colors ${isCancelled ? 'opacity-50 bg-neutral-50' : isOverdue ? 'bg-error-50/30' : ''}`}>
-                    <td className="table-cell font-medium text-primary-700">{inv.invoice_number}</td>
-                    <td className="table-cell">
-                      <p className="font-medium">{inv.customer_name}</p>
-                      <p className="text-xs text-neutral-400">{inv.customer_phone}</p>
+                  <tr key={inv.id} className={`border-b border-neutral-100 hover:bg-neutral-50 transition-colors ${isCancelled ? 'opacity-50 bg-neutral-50' : isOverdue ? 'bg-error-50/30' : ''}`}>
+                    <td className="py-3 px-3 font-medium text-primary-700 text-sm">{inv.invoice_number}</td>
+                    <td className="py-3 px-3">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-medium text-sm text-neutral-900">{inv.customer_name}</p>
+                        {((inv.delivery_challan_id && dcIsB2bMap[inv.delivery_challan_id as string]) || (inv.sales_order_id && soIsB2bMap[inv.sales_order_id])) && (
+                          <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full uppercase tracking-wider">B2B</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-400 mt-0.5">{inv.customer_phone}</p>
                     </td>
-                    <td className="table-cell">
+                    <td className="py-3 px-3">
                       <div className="flex flex-col gap-0.5">
                         {inv.sales_order_id && soMap[inv.sales_order_id] && (
-                          <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded w-fit">SO: {soMap[inv.sales_order_id]}</span>
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded w-fit inline-flex items-center gap-1 ${soIsB2bMap[inv.sales_order_id] ? 'bg-blue-100 text-blue-800' : 'bg-blue-50 text-blue-700'}`}>
+                            SO: {soMap[inv.sales_order_id]}
+                            {soIsB2bMap[inv.sales_order_id] && <span className="text-[9px] font-bold uppercase">(b2b)</span>}
+                          </span>
                         )}
                         {(inv as Record<string, unknown>).delivery_challan_id && dcMap[(inv as Record<string, unknown>).delivery_challan_id as string] && (() => {
-                          const dcNum = dcMap[(inv as Record<string, unknown>).delivery_challan_id as string];
+                          const dcId = (inv as Record<string, unknown>).delivery_challan_id as string;
+                          const dcNum = dcMap[dcId];
                           const isLegacy = dcNum.startsWith('LEGACY-DC-');
+                          const isB2B = dcIsB2bMap[dcId];
                           return (
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded w-fit ${isLegacy ? 'bg-neutral-100 text-neutral-500' : 'bg-orange-50 text-orange-700'}`}>
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded w-fit inline-flex items-center gap-1 ${isLegacy ? 'bg-neutral-100 text-neutral-500' : isB2B ? 'bg-blue-100 text-blue-800' : 'bg-orange-50 text-orange-700'}`}>
                               {isLegacy ? 'Legacy' : `DC: ${dcNum}`}
+                              {isB2B && <span className="text-[9px] font-bold uppercase">(b2b)</span>}
                             </span>
                           );
                         })()}
@@ -880,14 +901,14 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                         )}
                       </div>
                     </td>
-                    <td className="table-cell text-neutral-500">{formatDate(inv.invoice_date)}</td>
-                    <td className="table-cell text-right">
+                    <td className="py-3 px-3 text-sm text-neutral-500">{formatDate(inv.invoice_date)}</td>
+                    <td className="py-3 px-3 text-right">
                       <p className="font-semibold text-neutral-900">{formatCurrency(inv.total_amount)}</p>
                       {inv.paid_amount > 0 && !isPaid && (
                         <p className="text-[10px] text-success-600 mt-0.5">Paid: {formatCurrency(inv.paid_amount)}</p>
                       )}
                     </td>
-                    <td className="table-cell text-right">
+                    <td className="py-3 px-3 text-right">
                       {isPaid ? (
                         <span className="inline-flex items-center gap-1 text-success-600 font-medium text-xs">
                           <CheckCircle className="w-3 h-3" /> Fully Paid
@@ -898,7 +919,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                         </span>
                       )}
                     </td>
-                    <td className="table-cell"><StatusBadge status={inv.status} /></td>
+                    <td className="py-3 px-3"><StatusBadge status={inv.status} /></td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1" ref={invDropdownRef}>
                         {!isPaid && inv.status !== 'cancelled' && (
@@ -926,7 +947,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                               >
                                 <Printer className="w-3.5 h-3.5" /> Print Invoice
                               </button>
-                              {inv.delivery_challan_id && dcIsB2bMap[inv.delivery_challan_id] && (
+                              {((inv.delivery_challan_id && dcIsB2bMap[inv.delivery_challan_id as string]) || (inv.sales_order_id && soIsB2bMap[inv.sales_order_id])) && (
                                 <button
                                   onClick={() => { setInvDropdownOpen(null); openPrint(inv, 'b2b'); }}
                                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-blue-700 hover:bg-blue-50 transition-colors"
@@ -1039,12 +1060,20 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                 <StatusBadge status={selectedInvoice.status} />
               </div>
               {selectedInvoice.sales_order_id && soMap[selectedInvoice.sales_order_id] && (
-                <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium">SO: {soMap[selectedInvoice.sales_order_id]}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 ${soIsB2bMap[selectedInvoice.sales_order_id] ? 'bg-blue-100 text-blue-800' : 'bg-blue-50 text-blue-700'}`}>
+                  SO: {soMap[selectedInvoice.sales_order_id]}
+                  {soIsB2bMap[selectedInvoice.sales_order_id] && <span className="text-[9px] font-bold uppercase">(b2b)</span>}
+                </span>
               )}
               {(selectedInvoice as Record<string, unknown>).delivery_challan_id && dcMap[(selectedInvoice as Record<string, unknown>).delivery_challan_id as string] && (() => {
-                const dcNum = dcMap[(selectedInvoice as Record<string, unknown>).delivery_challan_id as string];
+                const dcId = (selectedInvoice as Record<string, unknown>).delivery_challan_id as string;
+                const dcNum = dcMap[dcId];
+                const isDcB2b = dcIsB2bMap[dcId];
                 return dcNum.startsWith('LEGACY-DC-') ? null : (
-                  <span className="text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded font-medium">DC: {dcNum}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 ${isDcB2b ? 'bg-blue-100 text-blue-800' : 'bg-orange-50 text-orange-700'}`}>
+                    DC: {dcNum}
+                    {isDcB2b && <span className="text-[9px] font-bold uppercase">(b2b)</span>}
+                  </span>
                 );
               })()}
               {viewRelated.payments.length > 0 && (

@@ -15,14 +15,18 @@ export default function Login() {
     setError('');
     if (!form.username.trim()) { setError('Username is required'); return; }
     setLoading(true);
-    const username = form.username.trim();
+    const username = form.username.trim().toLowerCase();
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('email')
-      .ilike('display_name', username)
+      .eq('username', username)
       .maybeSingle();
-    const email = profile?.email ?? `${username.toLowerCase()}@prachifulagar.app`;
-    const { error } = await signIn(email, form.password);
+    if (!profile?.email) {
+      setError('Invalid username or password');
+      setLoading(false);
+      return;
+    }
+    const { error } = await signIn(profile.email, form.password);
     if (error) setError('Invalid username or password');
     setLoading(false);
   };

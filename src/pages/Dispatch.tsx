@@ -414,18 +414,18 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <div className="relative flex-1 min-w-[160px]">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-              <input type="text" placeholder="Search dispatch, LR, customer..." value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-8 text-xs py-1.5 w-full" />
+              <input type="text" placeholder="Search dispatch, LR, customer..." value={search} onChange={e => setSearch(e.target.value)} className="input pl-8 text-xs py-1.5 w-full" />
             </div>
-            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="input-field text-xs py-1.5 w-40">
+            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="input text-xs py-1.5 w-40">
               <option value="">All Customers</option>
               {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="input-field text-xs py-1.5 w-36">
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="input text-xs py-1.5 w-36">
               <option value="all">All Status</option>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
-            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="input-field text-xs py-1.5 w-36" title="From date" />
-            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="input-field text-xs py-1.5 w-36" title="To date" />
+            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="input text-xs py-1.5 w-36" title="From date" />
+            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="input text-xs py-1.5 w-36" title="To date" />
             {(filterCustomer || filterStatus !== 'all' || filterFrom || filterTo || search) && (
               <button onClick={() => { setFilterCustomer(''); setFilterStatus('all'); setFilterFrom(''); setFilterTo(''); setSearch(''); }} className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 transition-colors" title="Clear filters">
                 <X className="w-3.5 h-3.5" />
@@ -478,16 +478,17 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
                         <td className="table-cell font-medium text-primary-700 font-mono text-xs">{d.dispatch_number}</td>
                         <td className="table-cell">
                           {b2bMap[d.id] ? (
-                            <div className="space-y-0.5">
+                            <div>
                               <div className="flex items-center gap-1">
-                                <span className="text-[9px] font-bold text-neutral-400 uppercase tracking-widest w-12 shrink-0">Bill To</span>
                                 <span className="text-xs font-medium text-neutral-800">{b2bMap[d.id].billTo}</span>
+                                {b2bMap[d.id].shipTo && (
+                                  <>
+                                    <span className="text-neutral-300 text-xs">/</span>
+                                    <span className="text-xs font-medium text-blue-700">{b2bMap[d.id].shipTo}</span>
+                                  </>
+                                )}
                               </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest w-12 shrink-0">Ship To</span>
-                                <span className="text-xs font-medium text-blue-700">{b2bMap[d.id].shipTo || '—'}</span>
-                              </div>
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-600 uppercase tracking-wider">B2B</span>
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-600 uppercase tracking-wider mt-0.5">B2B</span>
                             </div>
                           ) : (
                             <span className="font-medium text-neutral-800">{d.customer_name || '—'}</span>
@@ -623,16 +624,16 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Reference Type</label>
-              <select className="input-field" value={form.reference_type} onChange={e => setForm({ ...form, reference_type: e.target.value as 'sales_order' | 'invoice', sales_order_id: '', invoice_id: '', customer_name: '' })}>
+              <label className="label">Reference Type</label>
+              <select className="input" value={form.reference_type} onChange={e => setForm({ ...form, reference_type: e.target.value as 'sales_order' | 'invoice', sales_order_id: '', invoice_id: '', customer_name: '' })}>
                 <option value="sales_order">Sales Order</option>
                 <option value="invoice">Invoice</option>
               </select>
             </div>
             {form.reference_type === 'sales_order' ? (
               <div>
-                <label className="form-label">Sales Order</label>
-                <select className="input-field" value={form.sales_order_id} onChange={e => {
+                <label className="label">Sales Order</label>
+                <select className="input" value={form.sales_order_id} onChange={e => {
                   const so = soOptions.find(s => s.id === e.target.value);
                   setForm({ ...form, sales_order_id: e.target.value, customer_name: so?.customer_name || form.customer_name });
                 }}>
@@ -642,8 +643,8 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
               </div>
             ) : (
               <div>
-                <label className="form-label">Invoice</label>
-                <select className="input-field" value={form.invoice_id} onChange={e => {
+                <label className="label">Invoice</label>
+                <select className="input" value={form.invoice_id} onChange={e => {
                   const inv = invOptions.find(i => i.id === e.target.value);
                   setForm({ ...form, invoice_id: e.target.value, customer_name: inv?.customer_name || form.customer_name });
                 }}>
@@ -655,13 +656,13 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
           </div>
 
           <div>
-            <label className="form-label">Customer Name</label>
-            <input className="input-field" value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} placeholder="Customer name" />
+            <label className="label">Customer Name</label>
+            <input className="input" value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} placeholder="Customer name" />
           </div>
 
           <div>
-            <label className="form-label flex items-center gap-1.5"><Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Dispatched From Godown</label>
-            <select className="input-field" value={form.godown_id} onChange={e => setForm({ ...form, godown_id: e.target.value })}>
+            <label className="label flex items-center gap-1.5"><Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Dispatched From Godown</label>
+            <select className="input" value={form.godown_id} onChange={e => setForm({ ...form, godown_id: e.target.value })}>
               <option value="">-- Select Godown --</option>
               {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.location ? ` (${g.location})` : ''}</option>)}
             </select>
@@ -669,59 +670,59 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Dispatch Mode *</label>
-              <select className="input-field" value={form.dispatch_mode} onChange={e => setForm({ ...form, dispatch_mode: e.target.value })}>
+              <label className="label">Dispatch Mode *</label>
+              <select className="input" value={form.dispatch_mode} onChange={e => setForm({ ...form, dispatch_mode: e.target.value })}>
                 {DISPATCH_MODES.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div>
-              <label className="form-label">Transport / Courier Company</label>
-              <input className="input-field" value={form.transport_name} onChange={e => setForm({ ...form, transport_name: e.target.value })} placeholder="e.g. DTDC, Blue Dart" />
+              <label className="label">Transport / Courier Company</label>
+              <input className="input" value={form.transport_name} onChange={e => setForm({ ...form, transport_name: e.target.value })} placeholder="e.g. DTDC, Blue Dart" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">LR / Tracking Number</label>
-              <input className="input-field" value={form.lr_number} onChange={e => setForm({ ...form, lr_number: e.target.value })} placeholder="LR or tracking ID" />
+              <label className="label">LR / Tracking Number</label>
+              <input className="input" value={form.lr_number} onChange={e => setForm({ ...form, lr_number: e.target.value })} placeholder="LR or tracking ID" />
             </div>
             <div>
-              <label className="form-label">Vehicle Number</label>
-              <input className="input-field" value={form.vehicle_number} onChange={e => setForm({ ...form, vehicle_number: e.target.value })} placeholder="e.g. MH12AB1234" />
+              <label className="label">Vehicle Number</label>
+              <input className="input" value={form.vehicle_number} onChange={e => setForm({ ...form, vehicle_number: e.target.value })} placeholder="e.g. MH12AB1234" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="form-label">Driver Name</label>
-              <input className="input-field" value={form.driver_name} onChange={e => setForm({ ...form, driver_name: e.target.value })} placeholder="Driver name" />
+              <label className="label">Driver Name</label>
+              <input className="input" value={form.driver_name} onChange={e => setForm({ ...form, driver_name: e.target.value })} placeholder="Driver name" />
             </div>
             <div>
-              <label className="form-label">Driver Phone</label>
-              <input className="input-field" value={form.driver_phone} onChange={e => setForm({ ...form, driver_phone: e.target.value })} placeholder="Driver contact" />
+              <label className="label">Driver Phone</label>
+              <input className="input" value={form.driver_phone} onChange={e => setForm({ ...form, driver_phone: e.target.value })} placeholder="Driver contact" />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="form-label">Dispatch Date *</label>
-              <input type="date" className="input-field" value={form.dispatch_date} onChange={e => setForm({ ...form, dispatch_date: e.target.value })} />
+              <label className="label">Dispatch Date *</label>
+              <input type="date" className="input" value={form.dispatch_date} onChange={e => setForm({ ...form, dispatch_date: e.target.value })} />
             </div>
             <div>
-              <label className="form-label">Expected Delivery</label>
-              <input type="date" className="input-field" value={form.expected_delivery_date} onChange={e => setForm({ ...form, expected_delivery_date: e.target.value })} />
+              <label className="label">Expected Delivery</label>
+              <input type="date" className="input" value={form.expected_delivery_date} onChange={e => setForm({ ...form, expected_delivery_date: e.target.value })} />
             </div>
             <div>
-              <label className="form-label">Status</label>
-              <select className="input-field" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <label className="label">Status</label>
+              <select className="input" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
                 {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
           </div>
 
           <div>
-            <label className="form-label">Notes</label>
-            <textarea className="input-field" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
+            <label className="label">Notes</label>
+            <textarea className="input" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

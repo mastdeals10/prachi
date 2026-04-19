@@ -15,7 +15,7 @@ function joinAddress(parts: (string | undefined | null)[]) {
 
 export default function ChallanPrint({ challan, companyOverride, printMode = 'normal' }: ChallanPrintProps) {
   const { company: defaultCompany } = useCompanySettings();
-  const isB2B = printMode === 'b2b' || !!challan.is_b2b;
+  const isB2B = printMode === 'b2b';
 
   const company = companyOverride ? {
     name: companyOverride.name,

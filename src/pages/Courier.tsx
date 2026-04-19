@@ -35,8 +35,11 @@ const emptyForm = {
   customer_id: '', customer_name: '', courier_company: 'DTDC',
   tracking_id: '', weight_kg: '', charges: '', status: 'booked',
   notes: '', sales_order_id: '',
-  // address fields for label
+  // address fields for label (recipient = ship-to)
   customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', customer_phone: '',
+  // B2B: sender = billing party (Kunal), not the company
+  is_b2b: false,
+  sender_name: '', sender_phone: '', sender_address: '', sender_address2: '', sender_city: '', sender_state: '', sender_pincode: '',
 };
 
 interface CourierProps {
@@ -60,26 +63,88 @@ export default function Courier({ prefillFromDC }: CourierProps) {
 
   // Auto-open add modal when Challan "Create Shipment" is clicked
   useEffect(() => {
-    if (prefillFromDC) {
-      setEditing(null);
-      setForm({
-        ...emptyForm,
-        courier_date: new Date().toISOString().split('T')[0],
-        customer_id: prefillFromDC.customer_id || '',
-        customer_name: prefillFromDC.customer_name || '',
-        customer_phone: prefillFromDC.customer_phone || '',
-        customer_address: prefillFromDC.customer_address || '',
-        customer_address2: prefillFromDC.customer_address2 || '',
-        customer_city: prefillFromDC.customer_city || '',
-        customer_state: prefillFromDC.customer_state || '',
-        customer_pincode: prefillFromDC.customer_pincode || '',
-        sales_order_id: prefillFromDC.sales_order_id || '',
-        courier_company: prefillFromDC.courier_company || 'DTDC',
-        tracking_id: prefillFromDC.tracking_number || '',
-        notes: `From Challan ${prefillFromDC.challan_number}`,
-      });
+    if (!prefillFromDC) return;
+    setEditing(null);
+    const buildAndOpen = async () => {
+      const dc = prefillFromDC;
+      const isB2B = !!dc.is_b2b;
+      let shipTo = {
+        name: dc.ship_to_name || '',
+        phone: dc.ship_to_phone || '',
+        address: dc.ship_to_address1 || '',
+        address2: dc.ship_to_address2 || '',
+        city: dc.ship_to_city || '',
+        state: dc.ship_to_state || '',
+        pin: dc.ship_to_pin || '',
+      };
+      // If B2B but DC has no ship_to fields, fetch from linked SO
+      if (isB2B && !shipTo.name && dc.sales_order_id) {
+        const { data: so } = await supabase
+          .from('sales_orders')
+          .select('ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin')
+          .eq('id', dc.sales_order_id)
+          .maybeSingle();
+        if (so) {
+          shipTo = {
+            name: so.ship_to_name || '',
+            phone: so.ship_to_phone || '',
+            address: so.ship_to_address1 || '',
+            address2: so.ship_to_address2 || '',
+            city: so.ship_to_city || '',
+            state: so.ship_to_state || '',
+            pin: so.ship_to_pin || '',
+          };
+        }
+      }
+      if (isB2B && shipTo.name) {
+        // B2B: recipient = ship_to (Ruchi), sender = billing party (Kunal)
+        setForm({
+          ...emptyForm,
+          courier_date: new Date().toISOString().split('T')[0],
+          customer_id: '',
+          customer_name: shipTo.name,
+          customer_phone: shipTo.phone,
+          customer_address: shipTo.address,
+          customer_address2: shipTo.address2,
+          customer_city: shipTo.city,
+          customer_state: shipTo.state,
+          customer_pincode: shipTo.pin,
+          sales_order_id: dc.sales_order_id || '',
+          courier_company: dc.courier_company || 'DTDC',
+          tracking_id: dc.tracking_number || '',
+          notes: `From Challan ${dc.challan_number}`,
+          is_b2b: true,
+          sender_name: dc.customer_name,
+          sender_phone: dc.customer_phone || '',
+          sender_address: dc.customer_address || '',
+          sender_address2: dc.customer_address2 || '',
+          sender_city: dc.customer_city || '',
+          sender_state: dc.customer_state || '',
+          sender_pincode: dc.customer_pincode || '',
+        });
+      } else {
+        // Normal: recipient = billing customer, from = company
+        setForm({
+          ...emptyForm,
+          courier_date: new Date().toISOString().split('T')[0],
+          customer_id: dc.customer_id || '',
+          customer_name: dc.customer_name || '',
+          customer_phone: dc.customer_phone || '',
+          customer_address: dc.customer_address || '',
+          customer_address2: dc.customer_address2 || '',
+          customer_city: dc.customer_city || '',
+          customer_state: dc.customer_state || '',
+          customer_pincode: dc.customer_pincode || '',
+          sales_order_id: dc.sales_order_id || '',
+          courier_company: dc.courier_company || 'DTDC',
+          tracking_id: dc.tracking_number || '',
+          notes: `From Challan ${dc.challan_number}`,
+          is_b2b: false,
+        });
+      }
       setShowModal(true);
-    }
+    };
+    buildAndOpen();
   }, [prefillFromDC]);
 
   const loadData = async () => {
@@ -204,29 +269,34 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     iframe.id = 'label-print-frame';
     iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:297mm;height:210mm;border:none;';
     document.body.appendChild(iframe);
-    // Build address lines — each on its own line
     const toAddrParts = [
       printEntry.customer_address,
       printEntry.customer_address2,
       [printEntry.customer_city, printEntry.customer_state, printEntry.customer_pincode].filter(Boolean).join(', '),
     ].filter(Boolean);
-    const fromAddrParts = [
+    const isB2BEntry = !!(printEntry as typeof emptyForm).is_b2b;
+    const senderName = isB2BEntry ? (printEntry as typeof emptyForm).sender_name || company.name : company.name;
+    const senderTagline = isB2BEntry ? '' : company.tagline;
+    const senderPhone = isB2BEntry ? (printEntry as typeof emptyForm).sender_phone || '' : company.phone;
+    const fromAddrParts = isB2BEntry ? [
+      (printEntry as typeof emptyForm).sender_address,
+      (printEntry as typeof emptyForm).sender_address2,
+      [(printEntry as typeof emptyForm).sender_city, (printEntry as typeof emptyForm).sender_state, (printEntry as typeof emptyForm).sender_pincode].filter(Boolean).join(', '),
+    ].filter(Boolean) : [
       company.address1,
       company.address2,
       [company.city, company.state, company.pincode].filter(Boolean).join(', '),
     ].filter(Boolean);
-    // Logo: use /pflogo.png served from public folder
-    const logoTag = `<img src="/pflogo.png" style="height:44px;width:auto;object-fit:contain" onerror="this.style.display='none'" />`;
+    const logoUrl = `${window.location.origin}/pflogo.png`;
+    const logoTag = `<img src="${logoUrl}" style="height:44px;width:auto;object-fit:contain" onerror="this.style.display='none'" />`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Shipping Label</title>
 <style>
   @page { size: A4 landscape; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Arial', Helvetica, sans-serif; background: white; width: 297mm; height: 210mm; display: flex; align-items: center; justify-content: center; }
   .wrap { border: 2.5px solid #222; width: 270mm; }
-  /* Top bar: logo left, empty right */
   .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1.5px solid #ddd; }
   .top-right { text-align: right; }
-  /* Main address section */
   .addrs { display: grid; grid-template-columns: 55% 45%; min-height: 90mm; }
   .ship-to { padding: 20px 22px 20px 20px; }
   .from-col { padding: 20px 20px 20px 22px; border-left: 1.5px solid #ddd; }
@@ -241,7 +311,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
 <div class="wrap">
   <div class="top-bar">
     <div>${logoTag}</div>
-    <div class="top-right"></div>
+    <div class="top-right">${isB2BEntry ? '<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#1d4ed8;padding:3px 8px;border-radius:4px;letter-spacing:1px">B2B SHIPMENT</span>' : ''}</div>
   </div>
   <div class="addrs">
     <div class="ship-to">
@@ -252,10 +322,10 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     </div>
     <div class="from-col">
       <span class="sec-lbl">FROM:</span>
-      <div class="from-name">${company.name}</div>
-      ${company.tagline ? `<div class="from-tagline">${company.tagline}</div>` : ''}
+      <div class="from-name">${senderName}</div>
+      ${senderTagline ? `<div class="from-tagline">${senderTagline}</div>` : ''}
       ${fromAddrParts.map(l => `<p class="from-line">${l}</p>`).join('')}
-      ${company.phone ? `<p class="from-line">Ph: ${company.phone}</p>` : ''}
+      ${senderPhone ? `<p class="from-line">Ph: ${senderPhone}</p>` : ''}
     </div>
   </div>
 </div>
@@ -410,77 +480,124 @@ export default function Courier({ prefillFromDC }: CourierProps) {
             {saving ? 'Saving...' : editing ? 'Update' : 'Add & Print Label'}
           </button>
         </>}>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="label">Date</label>
-            <input type="date" value={form.courier_date} onChange={e => setForm(f => ({ ...f, courier_date: e.target.value }))} className="input" />
-          </div>
-          <div>
-            <label className="label">Customer</label>
-            <select value={form.customer_id} onChange={e => handleCustomerSelect(e.target.value)} className="input">
-              <option value="">— Select —</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Customer Name *</label>
-            <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input" placeholder="Name" />
-          </div>
-          <div>
-            <label className="label">Phone</label>
-            <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input" placeholder="+91..." />
-          </div>
-          <div>
-            <label className="label">Via (Transport) *</label>
-            <select value={form.courier_company} onChange={e => setForm(f => ({ ...f, courier_company: e.target.value }))} className="input">
-              {TRANSPORT_OPTIONS.map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Tracking / LR Number</label>
-            <input value={form.tracking_id} onChange={e => setForm(f => ({ ...f, tracking_id: e.target.value }))} className="input" placeholder="AWB / LR no." />
-          </div>
-          <div className="col-span-2">
-            <label className="label">Address Line 1</label>
-            <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street / House No." />
-          </div>
-          <div className="col-span-2">
-            <label className="label">Address Line 2</label>
-            <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input" placeholder="Area / Landmark" />
-          </div>
-          <div>
-            <label className="label">City / State / PIN</label>
-            <div className="flex gap-1">
-              <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input" placeholder="City" />
-              <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input w-20" placeholder="PIN" />
+        <div className="space-y-3">
+          {form.is_b2b && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 flex items-center gap-2">
+              <span className="text-[9px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded uppercase tracking-wider">B2B</span>
+              <p className="text-xs text-blue-700 font-medium">
+                Shipping from <strong>{form.sender_name}</strong> → to <strong>{form.customer_name}</strong>
+              </p>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="label">Date</label>
+              <input type="date" value={form.courier_date} onChange={e => setForm(f => ({ ...f, courier_date: e.target.value }))} className="input" />
+            </div>
+            <div>
+              <label className="label">Via (Transport) *</label>
+              <select value={form.courier_company} onChange={e => setForm(f => ({ ...f, courier_company: e.target.value }))} className="input">
+                {TRANSPORT_OPTIONS.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Tracking / LR Number</label>
+              <input value={form.tracking_id} onChange={e => setForm(f => ({ ...f, tracking_id: e.target.value }))} className="input" placeholder="AWB / LR no." />
             </div>
           </div>
-          <div>
-            <label className="label">Weight (kg)</label>
-            <input type="number" step="0.1" value={form.weight_kg} onChange={e => setForm(f => ({ ...f, weight_kg: e.target.value }))} className="input" placeholder="0.5" />
+          <div className="border border-neutral-100 rounded-lg p-3 space-y-2">
+            <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">{form.is_b2b ? 'SHIP TO (Recipient)' : 'Customer / Ship To'}</p>
+            <div className="grid grid-cols-3 gap-3">
+              {!form.is_b2b && (
+                <div>
+                  <label className="label">Customer</label>
+                  <select value={form.customer_id} onChange={e => handleCustomerSelect(e.target.value)} className="input">
+                    <option value="">— Select —</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">Name *</label>
+                <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input" placeholder="Name" />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input" placeholder="+91..." />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Address Line 1</label>
+                <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street / House No." />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Address Line 2</label>
+                <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input" placeholder="Area / Landmark" />
+              </div>
+              <div>
+                <label className="label">City / PIN</label>
+                <div className="flex gap-1">
+                  <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input" placeholder="City" />
+                  <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input w-20" placeholder="PIN" />
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="label">Charges (₹)</label>
-            <input type="number" value={form.charges} onChange={e => setForm(f => ({ ...f, charges: e.target.value }))} className="input" placeholder="0" />
-          </div>
-          <div>
-            <label className="label">Link to Sales Order</label>
-            <select value={form.sales_order_id} onChange={e => setForm(f => ({ ...f, sales_order_id: e.target.value }))} className="input">
-              <option value="">— None —</option>
-              {soOptions.map(so => <option key={so.id} value={so.id}>{so.so_number} — {so.customer_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Status</label>
-            <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="input">
-              {['booked', 'in_transit', 'delivered', 'returned'].map(s => (
-                <option key={s} value={s}>{s.replace('_', ' ')}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Notes</label>
-            <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Optional" />
+          {form.is_b2b && (
+            <div className="border border-blue-100 rounded-lg p-3 space-y-2 bg-blue-50/30">
+              <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">FROM (Sender — {form.sender_name})</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="label">Name</label>
+                  <input value={form.sender_name} onChange={e => setForm(f => ({ ...f, sender_name: e.target.value }))} className="input" />
+                </div>
+                <div>
+                  <label className="label">Phone</label>
+                  <input value={form.sender_phone} onChange={e => setForm(f => ({ ...f, sender_phone: e.target.value }))} className="input" placeholder="+91..." />
+                </div>
+                <div className="col-span-2">
+                  <label className="label">Address</label>
+                  <input value={form.sender_address} onChange={e => setForm(f => ({ ...f, sender_address: e.target.value }))} className="input" placeholder="Street / Area" />
+                </div>
+                <div>
+                  <label className="label">City / PIN</label>
+                  <div className="flex gap-1">
+                    <input value={form.sender_city} onChange={e => setForm(f => ({ ...f, sender_city: e.target.value }))} className="input" placeholder="City" />
+                    <input value={form.sender_pincode} onChange={e => setForm(f => ({ ...f, sender_pincode: e.target.value }))} className="input w-20" placeholder="PIN" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="label">Weight (kg)</label>
+              <input type="number" step="0.1" value={form.weight_kg} onChange={e => setForm(f => ({ ...f, weight_kg: e.target.value }))} className="input" placeholder="0.5" />
+            </div>
+            <div>
+              <label className="label">Charges (₹)</label>
+              <input type="number" value={form.charges} onChange={e => setForm(f => ({ ...f, charges: e.target.value }))} className="input" placeholder="0" />
+            </div>
+            {!form.is_b2b && (
+              <div>
+                <label className="label">Link to Sales Order</label>
+                <select value={form.sales_order_id} onChange={e => setForm(f => ({ ...f, sales_order_id: e.target.value }))} className="input">
+                  <option value="">— None —</option>
+                  {soOptions.map(so => <option key={so.id} value={so.id}>{so.so_number} — {so.customer_name}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="label">Status</label>
+              <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="input">
+                {['booked', 'in_transit', 'delivered', 'returned'].map(s => (
+                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Notes</label>
+              <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Optional" />
+            </div>
           </div>
         </div>
       </Modal>
@@ -517,15 +634,26 @@ export default function Courier({ prefillFromDC }: CourierProps) {
                     )}
                     {printEntry.customer_phone && <p className="text-sm text-neutral-600 mt-1">Ph: {printEntry.customer_phone}</p>}
                   </div>
-                  {/* FROM — right */}
+                  {/* FROM — right: use sender if B2B, company otherwise */}
                   <div className="p-5">
                     <p className="text-[9px] font-black uppercase tracking-widest text-neutral-400 mb-3">FROM:</p>
-                    <p className="text-sm font-bold text-neutral-900">{company.name}</p>
-                    {company.tagline && <p className="text-[11px] text-neutral-400 mb-1">{company.tagline}</p>}
-                    {company.address1 && <p className="text-xs text-neutral-600">{company.address1}</p>}
-                    {company.address2 && <p className="text-xs text-neutral-600">{company.address2}</p>}
-                    {(company.city || company.pincode) && <p className="text-xs text-neutral-600">{[company.city, company.state, company.pincode].filter(Boolean).join(', ')}</p>}
-                    {company.phone && <p className="text-xs text-neutral-600">Ph: {company.phone}</p>}
+                    {(printEntry as typeof emptyForm).is_b2b ? (
+                      <>
+                        <p className="text-sm font-bold text-neutral-900">{(printEntry as typeof emptyForm).sender_name}</p>
+                        {(printEntry as typeof emptyForm).sender_phone && <p className="text-xs text-neutral-600">Ph: {(printEntry as typeof emptyForm).sender_phone}</p>}
+                        {(printEntry as typeof emptyForm).sender_address && <p className="text-xs text-neutral-600">{(printEntry as typeof emptyForm).sender_address}</p>}
+                        {(printEntry as typeof emptyForm).sender_city && <p className="text-xs text-neutral-600">{[(printEntry as typeof emptyForm).sender_city, (printEntry as typeof emptyForm).sender_state, (printEntry as typeof emptyForm).sender_pincode].filter(Boolean).join(', ')}</p>}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-bold text-neutral-900">{company.name}</p>
+                        {company.tagline && <p className="text-[11px] text-neutral-400 mb-1">{company.tagline}</p>}
+                        {company.address1 && <p className="text-xs text-neutral-600">{company.address1}</p>}
+                        {company.address2 && <p className="text-xs text-neutral-600">{company.address2}</p>}
+                        {(company.city || company.pincode) && <p className="text-xs text-neutral-600">{[company.city, company.state, company.pincode].filter(Boolean).join(', ')}</p>}
+                        {company.phone && <p className="text-xs text-neutral-600">Ph: {company.phone}</p>}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

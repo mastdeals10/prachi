@@ -1,26 +1,27 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck } from 'lucide-react';
+import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
-import ActionMenu, { actionEdit, actionDelete } from '../components/ui/ActionMenu';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { processStockMovement } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
 import type { PurchaseEntry, Product, Supplier, Godown } from '../types';
 
-type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed';
+type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed' | 'Cancelled';
 
 const DELIVERY_STATUS_COLORS: Record<DeliveryStatus, string> = {
   'Pending': 'bg-neutral-100 text-neutral-600',
   'In Transit': 'bg-blue-100 text-blue-700',
   'Delivered': 'bg-success-100 text-success-700',
   'Delayed': 'bg-error-100 text-error-700',
+  'Cancelled': 'bg-error-100 text-error-700',
 };
 
 function computeDeliveryStatus(entry: PurchaseEntry): DeliveryStatus {
+  if (entry.status === 'cancelled') return 'Cancelled';
   const status = (entry.delivery_status || 'Pending') as DeliveryStatus;
   if (status === 'Delivered') return 'Delivered';
   if (entry.expected_delivery_date) {
@@ -70,6 +71,7 @@ export default function Purchase() {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [confirmEntry, setConfirmEntry] = useState<PurchaseEntry | null>(null);
   const [confirmSupplier, setConfirmSupplier] = useState<Supplier | null>(null);
+  const [editingDeliveryDate, setEditingDeliveryDate] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     supplier_id: '', supplier_name: '',
@@ -96,6 +98,12 @@ export default function Purchase() {
     setSuppliers(suppliersRes.data || []);
     setProducts((productsRes.data || []) as any);
     setGodowns(godownsRes.data || []);
+  };
+
+  const saveDeliveryDate = async (entryId: string, date: string) => {
+    setEditingDeliveryDate(null);
+    await supabase.from('purchase_entries').update({ expected_delivery_date: date || null }).eq('id', entryId);
+    setEntries(prev => prev.map(e => e.id === entryId ? { ...e, expected_delivery_date: date || undefined } : e));
   };
 
   const addItem = () => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
@@ -552,12 +560,31 @@ export default function Purchase() {
                         <td className="table-cell">
                           <p className="text-xs text-neutral-500">{formatDate(e.entry_date)}</p>
                         </td>
-                        <td className="table-cell">
-                          {e.expected_delivery_date ? (
-                            <p className={`text-xs ${ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-500'}`}>
-                              {formatDate(e.expected_delivery_date)}
-                            </p>
-                          ) : <p className="text-xs text-neutral-300">—</p>}
+                        <td className="table-cell" onClick={() => setEditingDeliveryDate(e.id)}>
+                          {editingDeliveryDate === e.id ? (
+                            <input
+                              type="date"
+                              autoFocus
+                              defaultValue={e.expected_delivery_date || ''}
+                              className="input text-xs py-0.5 px-1 w-32"
+                              onBlur={ev => saveDeliveryDate(e.id, ev.target.value)}
+                              onKeyDown={ev => {
+                                if (ev.key === 'Enter') saveDeliveryDate(e.id, (ev.target as HTMLInputElement).value);
+                                if (ev.key === 'Escape') setEditingDeliveryDate(null);
+                              }}
+                              onClick={ev => ev.stopPropagation()}
+                            />
+                          ) : (
+                            <div className="group cursor-pointer">
+                              {e.expected_delivery_date ? (
+                                <p className={`text-xs ${ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-500'} group-hover:underline group-hover:text-primary-600`}>
+                                  {formatDate(e.expected_delivery_date)}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-neutral-300 group-hover:text-primary-400">Click to set</p>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="table-cell text-right">
                           <p className="text-sm font-semibold text-neutral-900">{formatCurrency(e.total_amount)}</p>
@@ -570,7 +597,7 @@ export default function Purchase() {
                         </td>
                         <td className="table-cell text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {ds !== 'Delivered' && (
+                            {e.status !== 'cancelled' && ds !== 'Delivered' && (
                               <button
                                 onClick={() => openReceiveGoods(e)}
                                 className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
@@ -586,10 +613,22 @@ export default function Purchase() {
                                 Mark Paid
                               </button>
                             )}
-                            <ActionMenu items={[
-                              actionEdit(() => openEditEntry(e)),
-                              actionDelete(() => setConfirmEntry(e)),
-                            ]} />
+                            <button
+                              onClick={() => openEditEntry(e)}
+                              title="Edit"
+                              className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            {e.status !== 'cancelled' && (
+                              <button
+                                onClick={() => setConfirmEntry(e)}
+                                title="Cancel Entry"
+                                className="p-1.5 rounded-lg text-neutral-400 hover:text-error-600 hover:bg-error-50 transition-colors"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -664,10 +703,14 @@ export default function Purchase() {
                       ) : <span className="text-success-600 font-medium">Clear</span>}
                     </td>
                     <td className="table-cell text-right">
-                      <ActionMenu items={[
-                        actionEdit(() => openEditSupplier(s)),
-                        actionDelete(() => setConfirmSupplier(s)),
-                      ]} />
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEditSupplier(s)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setConfirmSupplier(s)} title="Remove" className="p-1.5 rounded-lg text-neutral-400 hover:text-error-600 hover:bg-error-50 transition-colors">
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
