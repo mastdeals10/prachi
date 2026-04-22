@@ -146,7 +146,7 @@ export default function Inventory() {
       total_weight: p.total_weight ? String(p.total_weight) : '',
       weight_unit: (p.weight_unit as 'grams' | 'carats') || 'grams',
       low_stock_enabled: p.low_stock_alert > 0,
-      company_id: (p as unknown as { company_id?: string }).company_id || '',
+      company_id: p.company_id || '',
     });
     setShowModal(true);
   };
