@@ -136,25 +136,26 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const loadData = async () => {
     const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone, weight_unit, low_stock_alert').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean }>).map(p => ({
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean; weight_unit?: string; low_stock_alert?: number }>).map(p => ({
       id: p.id,
       name: p.name,
       unit: p.unit,
       selling_price: p.selling_price,
       stock_quantity: p.stock_quantity,
       sku: '',
-      category: 'Astro Products',
+      category: 'Astro Products' as const,
       purchase_price: 0,
-      low_stock_alert: 0,
+      low_stock_alert: p.low_stock_alert ?? 0,
       is_active: true,
       created_at: '',
       updated_at: '',
       is_gemstone: !!p.is_gemstone,
+      weight_unit: (p.weight_unit as 'grams' | 'carats' | undefined),
     })));
     setCustomers(((customersRes.data || []) as Array<{ id: string; name: string; phone?: string; address?: string; address2?: string; city?: string; state?: string; pincode?: string; balance?: number; total_revenue?: number }>).map(c => ({
       id: c.id,
@@ -346,12 +347,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     }
   };
 
-  const getStockForItem = (item: LineItem): number | null => {
+  const getStockForItem = (item: LineItem, lineIndex: number): number | null => {
     if (!item.product_id) return null;
+    const p = products.find(pp => pp.id === item.product_id);
+    if (p?.is_gemstone) {
+      return lineUnits[lineIndex]?.length ?? null;
+    }
     if (godownStockMap[item.product_id] !== undefined) {
       return godownStockMap[item.product_id];
     }
-    const p = products.find(p => p.id === item.product_id);
     return p ? (p.stock_quantity ?? 0) : null;
   };
 
@@ -688,6 +692,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', dc.id);
         await supabase.from('delivery_challans').delete().eq('id', dc.id);
       }
+
+      await supabase.from('product_units').update({
+        status: 'in_stock',
+        sold_at: null,
+        sold_reference_type: null,
+        sold_reference_id: null,
+      }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', soId);
 
       const { error: soItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', soId);
       if (soItemsErr) throw soItemsErr;
@@ -1120,7 +1131,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 </thead>
                 <tbody>
                   {items.map((item, i) => {
-                    const stock = getStockForItem(item);
+                    const stock = getStockForItem(item, i);
                     const qty = parseFloat(item.quantity) || 0;
                     return (
                       <tr key={i} className="border-t border-neutral-100">
@@ -1143,10 +1154,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                             {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                           </select>
                           {item.product_id && (() => {
-                            const s = godownStockMap[item.product_id];
+                            const isGem = !!products.find(p => p.id === item.product_id)?.is_gemstone;
+                            const s = isGem ? (lineUnits[i]?.length ?? undefined) : godownStockMap[item.product_id];
                             return s !== undefined ? (
                               <p className={`text-[10px] mt-0.5 text-right font-medium ${s === 0 ? 'text-error-600' : s <= (products.find(p=>p.id===item.product_id)?.low_stock_alert||5) ? 'text-warning-600' : 'text-success-600'}`}>
-                                {s} in stock
+                                {s} {isGem ? 'piece(s)' : 'in stock'}
                               </p>
                             ) : null;
                           })()}
@@ -1290,6 +1302,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         onClose={() => setCancelSOTarget(null)}
         onConfirm={async () => {
           if (!cancelSOTarget) return;
+          await supabase.from('product_units').update({
+            status: 'in_stock',
+            sold_at: null,
+            sold_reference_type: null,
+            sold_reference_id: null,
+          }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', cancelSOTarget.id);
           await supabase.from('sales_orders').update({ status: 'cancelled' }).eq('id', cancelSOTarget.id);
           setCancelSOTarget(null);
           loadData();

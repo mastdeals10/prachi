@@ -46,6 +46,9 @@ interface ReceiveItem {
   unit: string;
   ordered_qty: number;
   received_qty: string;
+  is_gemstone?: boolean;
+  weight_unit?: string;
+  piece_weights?: string;
 }
 
 interface EntryItemRow {
@@ -194,12 +197,16 @@ export default function Purchase() {
       const orderedQty = Number(item.quantity) || 0;
       const previouslyReceived = item.product_id ? (alreadyReceived[item.product_id] || 0) : 0;
       const remaining = Math.max(0, orderedQty - previouslyReceived);
+      const prod = products.find(p => p.id === item.product_id);
       return {
         product_id: item.product_id || '',
         product_name: item.product_name,
         unit: item.unit,
         ordered_qty: orderedQty,
         received_qty: String(remaining),
+        is_gemstone: prod?.is_gemstone || false,
+        weight_unit: prod?.weight_unit || 'grams',
+        piece_weights: '',
       };
     });
     setReceiveItems(loaded.length ? loaded : []);
@@ -220,6 +227,35 @@ export default function Purchase() {
     // receiveItems.received_qty is the DELTA for this batch (remaining qty pre-filled).
     const nowReceived = receiveItems.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0);
     if (nowReceived <= 0) return;
+
+    // For gemstone items: validate and create product_units rows.
+    for (const item of receiveItems) {
+      if (!item.is_gemstone || !item.product_id || (parseFloat(item.received_qty) || 0) <= 0) continue;
+      const parsedWeights = (item.piece_weights || '')
+        .split('\n')
+        .map(w => Number(w.trim()))
+        .filter(w => Number.isFinite(w) && w > 0);
+      const receivedQty = parseFloat(item.received_qty) || 0;
+      if (parsedWeights.length === 0) {
+        alert(`Please enter one weight per line for gemstone product: ${item.product_name}`);
+        return;
+      }
+      if (parsedWeights.length !== receivedQty) {
+        alert(`${item.product_name}: you entered ${parsedWeights.length} piece weight(s) but received qty is ${receivedQty}. They must match.`);
+        return;
+      }
+      const prod = products.find(p => p.id === item.product_id);
+      const wUnit: 'g' | 'kg' | 'carat' = prod?.weight_unit === 'carats' ? 'carat' : prod?.weight_unit === 'kg' ? 'kg' : 'g';
+      const rows = parsedWeights.map(weight => ({
+        product_id: item.product_id,
+        weight,
+        weight_unit: wUnit,
+        status: 'in_stock' as const,
+        godown_id: receiveGodownId,
+      }));
+      const { error: unitInsertErr } = await supabase.from('product_units').insert(rows);
+      if (unitInsertErr) throw unitInsertErr;
+    }
 
     // Post stock only for items with positive quantity in this batch.
     const stockItems = receiveItems
@@ -868,30 +904,52 @@ export default function Purchase() {
                   const recv = parseFloat(item.received_qty) || 0;
                   const remaining = Math.max(0, item.ordered_qty - recv);
                   return (
-                    <tr key={i} className="border-t border-neutral-100">
-                      <td className="px-3 py-2.5">
-                        <p className="text-sm font-medium text-neutral-800">{item.product_name}</p>
-                        <p className="text-[10px] text-neutral-400">{item.unit}</p>
-                      </td>
-                      <td className="px-3 py-2.5 text-right text-sm text-neutral-600">{item.ordered_qty}</td>
-                      <td className="px-3 py-2.5">
-                        <input
-                          type="number"
-                          min="0"
-                          max={item.ordered_qty}
-                          value={item.received_qty}
-                          onChange={e => setReceiveItems(prev => {
-                            const next = [...prev];
-                            next[i] = { ...next[i], received_qty: e.target.value };
-                            return next;
-                          })}
-                          className="input text-xs text-right w-full"
-                        />
-                      </td>
-                      <td className={`px-3 py-2.5 text-right text-sm font-medium ${remaining === 0 ? 'text-success-600' : 'text-warning-600'}`}>
-                        {remaining === 0 ? '✓ Complete' : remaining}
-                      </td>
-                    </tr>
+                    <>
+                      <tr key={i} className="border-t border-neutral-100">
+                        <td className="px-3 py-2.5">
+                          <p className="text-sm font-medium text-neutral-800">{item.product_name}</p>
+                          <p className="text-[10px] text-neutral-400">{item.unit}{item.is_gemstone && <span className="ml-1 text-primary-600 font-semibold">Gemstone</span>}</p>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm text-neutral-600">{item.ordered_qty}</td>
+                        <td className="px-3 py-2.5">
+                          <input
+                            type="number"
+                            min="0"
+                            max={item.ordered_qty}
+                            value={item.received_qty}
+                            onChange={e => setReceiveItems(prev => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], received_qty: e.target.value };
+                              return next;
+                            })}
+                            className="input text-xs text-right w-full"
+                          />
+                        </td>
+                        <td className={`px-3 py-2.5 text-right text-sm font-medium ${remaining === 0 ? 'text-success-600' : 'text-warning-600'}`}>
+                          {remaining === 0 ? '✓ Complete' : remaining}
+                        </td>
+                      </tr>
+                      {item.is_gemstone && recv > 0 && (
+                        <tr key={`gem-${i}`} className="border-t border-neutral-50 bg-primary-50/40">
+                          <td colSpan={4} className="px-3 py-2">
+                            <label className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider block mb-1">
+                              Piece weights ({item.weight_unit === 'carats' ? 'carats' : 'grams'}) — one per line
+                            </label>
+                            <textarea
+                              value={item.piece_weights || ''}
+                              onChange={e => setReceiveItems(prev => {
+                                const next = [...prev];
+                                next[i] = { ...next[i], piece_weights: e.target.value };
+                                return next;
+                              })}
+                              className="input text-xs resize-none h-16 w-full font-mono"
+                              placeholder={'2.3\n4.1\n1.8'}
+                            />
+                            <p className="text-[10px] text-neutral-400 mt-0.5">Each weight becomes a trackable piece. Count should match received qty.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>

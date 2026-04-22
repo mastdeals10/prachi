@@ -303,7 +303,7 @@ export default function Inventory() {
             return;
           }
           const weightUnit: 'kg' | 'g' | 'carat' =
-            selectedProduct.unit === 'kg' ? 'kg' : selectedProduct.unit === 'carat' ? 'carat' : 'g';
+            selectedProduct.weight_unit === 'carats' ? 'carat' : selectedProduct.weight_unit === 'kg' ? 'kg' : 'g';
           const rows = parsedWeights.map(weight => ({
             product_id: selectedProduct.id,
             weight,
