@@ -15,7 +15,7 @@ import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import SalesOrderPrint from './SalesOrderPrint';
 import ProductCombobox from '../../components/ui/ProductCombobox';
-import type { SalesOrder, SalesOrderItem, Product, Customer, Godown } from '../../types';
+import type { SalesOrder, SalesOrderItem, Product, ProductUnit, Customer, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
 
@@ -29,6 +29,7 @@ interface LineItem {
   discount_pct?: string;
   total_price: number;
   godown_id: string;
+  product_unit_ids?: string[];
 }
 
 interface SalesOrdersProps {
@@ -66,6 +67,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [filterTo, setFilterTo] = useState('');
   const [cancelSOTarget, setCancelSOTarget] = useState<SalesOrder | null>(null);
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
+  const [lineUnits, setLineUnits] = useState<Record<number, ProductUnit[]>>({});
 
   const customerSelectRef = useRef<HTMLSelectElement>(null);
   const shipToNameRef = useRef<HTMLInputElement>(null);
@@ -134,12 +136,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const loadData = async () => {
     const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number }>).map(p => ({
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean }>).map(p => ({
       id: p.id,
       name: p.name,
       unit: p.unit,
@@ -152,6 +154,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       is_active: true,
       created_at: '',
       updated_at: '',
+      is_gemstone: !!p.is_gemstone,
     })));
     setCustomers(((customersRes.data || []) as Array<{ id: string; name: string; phone?: string; address?: string; address2?: string; city?: string; state?: string; pincode?: string; balance?: number; total_revenue?: number }>).map(c => ({
       id: c.id,
@@ -204,7 +207,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const addItem = (focusNew = false) => {
     setItems(prev => {
-      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }];
+      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }];
       if (focusNew) {
         const newIdx = next.length - 1;
         setTimeout(() => getProductRef(newIdx).current?.focus(), 30);
@@ -214,10 +217,24 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
   const removeItem = (i: number) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
+  const loadUnitsForLine = async (lineIndex: number, productId: string, godownId: string) => {
+    if (!productId || !godownId) return;
+    const product = products.find(p => p.id === productId);
+    if (!product?.is_gemstone) return;
+    const { data } = await supabase
+      .from('product_units')
+      .select('*')
+      .eq('product_id', productId)
+      .eq('status', 'in_stock')
+      .eq('godown_id', godownId)
+      .order('created_at', { ascending: true });
+    setLineUnits(prev => ({ ...prev, [lineIndex]: (data || []) as ProductUnit[] }));
+  };
+
   const handleProductSelect = useCallback(async (i: number, product: Product) => {
     setItems(prev => {
       const next = [...prev];
-      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1' };
+      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1', product_unit_ids: [] };
       const price = product.selling_price;
       next[i].total_price = price;
       return next;
@@ -237,6 +254,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return next;
     });
     if (bestGodown) loadGodownStock(bestGodown, [product.id]);
+    if (bestGodown) loadUnitsForLine(i, product.id, bestGodown);
 
     if (form.customer_id) {
       const smartRate = await getSmartRate(form.customer_id, product.id, product.selling_price);
@@ -283,7 +301,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); }
+        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); next[i].product_unit_ids = []; }
       }
       const qty = parseFloat(next[i].quantity) || 0;
       const price = parseFloat(next[i].unit_price) || 0;
@@ -307,6 +325,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         return next;
       });
       if (bestGodown) loadGodownStock(bestGodown, [value]);
+      if (bestGodown) loadUnitsForLine(i, value, bestGodown);
     }
 
     if (field === 'product_id' && value && form.customer_id) {
@@ -379,8 +398,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return;
     }
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
+    const missingGemPieces = itemsWithProduct.filter(i => {
+      const p = products.find(pp => pp.id === i.product_id);
+      return !!p?.is_gemstone && (i.product_unit_ids || []).length === 0;
+    });
     if (missingGodown.length > 0) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      return;
+    }
+    if (missingGemPieces.length > 0) {
+      alert('Please select at least one piece weight for each gemstone line.');
       return;
     }
     if (!form.customer_id) {
@@ -396,7 +423,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       const firstProdId = itemsWithProduct[0].product_id;
       const firstProd = products.find(p => p.id === firstProdId);
       const soCompanyId = (firstProd as unknown as { company_id?: string })?.company_id || null;
-      await createSalesOrder({
+      const soId = await createSalesOrder({
         so_number: soNumber,
         customer_id: form.customer_id,
         customer_name: form.customer_name,
@@ -432,6 +459,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           godown_id: i.godown_id || null,
         })),
       });
+      const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
+      if (selectedUnitIds.length > 0) {
+        await supabase.from('product_units').update({
+          status: 'sold',
+          sold_at: new Date().toISOString(),
+          sold_reference_type: 'sales_order',
+          sold_reference_id: soId,
+        }).in('id', selectedUnitIds);
+      }
       setShowModal(false);
       loadData();
     } catch (err) {
@@ -444,8 +480,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     if (!editOrder) return;
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
+    const missingGemPieces = itemsWithProduct.filter(i => {
+      const p = products.find(pp => pp.id === i.product_id);
+      return !!p?.is_gemstone && (i.product_unit_ids || []).length === 0;
+    });
     if (missingGodown.length > 0) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      return;
+    }
+    if (missingGemPieces.length > 0) {
+      alert('Please select at least one piece weight for each gemstone line.');
       return;
     }
     if (form.is_b2b && !form.ship_to_name.trim()) {
@@ -453,6 +497,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return;
     }
     try {
+      await supabase.from('product_units').update({
+        status: 'in_stock',
+        sold_at: null,
+        sold_reference_type: null,
+        sold_reference_id: null,
+      }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', editOrder.id);
+
       const { error: updateErr } = await supabase.from('sales_orders').update({
         customer_id: form.customer_id || null,
         customer_name: form.customer_name,
@@ -494,9 +545,19 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
           total_price: i.total_price,
           godown_id: i.godown_id || null,
+          product_unit_ids: i.product_unit_ids || [],
         }))
       );
       if (insertItemsErr) throw insertItemsErr;
+      const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
+      if (selectedUnitIds.length > 0) {
+        await supabase.from('product_units').update({
+          status: 'sold',
+          sold_at: new Date().toISOString(),
+          sold_reference_type: 'sales_order',
+          sold_reference_id: editOrder.id,
+        }).in('id', selectedUnitIds);
+      }
       setShowModal(false);
       setEditOrder(null);
       loadData();
@@ -546,9 +607,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             b2b_price: (i as Record<string, any>).b2b_price != null ? String((i as Record<string, any>).b2b_price) : String(i.unit_price),
             total_price: i.total_price,
             godown_id: i.godown_id || '',
+            product_unit_ids: i.product_unit_ids || [],
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }]
     );
+    (existingItems || []).forEach((it, idx) => {
+      if (it.product_id && it.godown_id) loadUnitsForLine(idx, it.product_id, it.godown_id);
+    });
     setShowModal(true);
   };
 
@@ -731,7 +796,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             setEditOrder(null);
             setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
             setGodownStockMap({});
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
+            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '', product_unit_ids: [] }]);
             setShowModal(true);
           }} className="btn-primary">
             <Plus className="w-4 h-4" /> New Order
@@ -1071,8 +1136,9 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                         <td className="px-3 py-2 w-32">
                           <select value={item.godown_id} onChange={e => {
                             const gid = e.target.value;
-                            setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: gid}; return next; });
+                            setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: gid, product_unit_ids: []}; return next; });
                             if (gid && item.product_id) loadGodownStock(gid, [item.product_id]);
+                            if (gid && item.product_id) loadUnitsForLine(i, item.product_id, gid);
                           }} className="input text-xs py-1">
                             {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                           </select>
@@ -1086,12 +1152,53 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           })()}
                         </td>
                         <td className="px-3 py-2 w-20">
-                          <input ref={getQtyRef(i)} type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
+                          <input ref={getQtyRef(i)} type="number" readOnly={!!products.find(p => p.id === item.product_id)?.is_gemstone} value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
+                          {products.find(p => p.id === item.product_id)?.is_gemstone && (
+                            <p className="text-[10px] text-neutral-400 mt-0.5 text-right">auto</p>
+                          )}
                         </td>
                         <td className="px-3 py-2 w-24"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
                         <td className={`px-3 py-2 w-24 ${!form.is_b2b ? 'hidden' : ''}`}><input type="number" value={item.b2b_price} onChange={e => updateItem(i, 'b2b_price', e.target.value)} placeholder={item.unit_price} className="input text-xs text-right" /></td>
                         <td className="px-3 py-2 w-24 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
                         <td className="px-3 py-2 w-8"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
+                      </tr>
+                    );
+                  })}
+                  {items.map((item, i) => {
+                    const isGem = !!products.find(p => p.id === item.product_id)?.is_gemstone;
+                    if (!isGem || !item.product_id) return null;
+                    const units = lineUnits[i] || [];
+                    return (
+                      <tr key={`units-${i}`} className="border-t border-neutral-50 bg-neutral-50/70">
+                        <td colSpan={7} className="px-3 py-2">
+                          <p className="text-[10px] font-semibold text-neutral-500 mb-1">Select pieces</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {units.map(u => {
+                              const checked = (item.product_unit_ids || []).includes(u.id);
+                              return (
+                                <label key={u.id} className={`px-2 py-1 rounded-full border text-[10px] cursor-pointer ${checked ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-neutral-200 text-neutral-600'}`}>
+                                  <input
+                                    type="checkbox"
+                                    className="mr-1"
+                                    checked={checked}
+                                    onChange={e => {
+                                      setItems(prev => {
+                                        const next = [...prev];
+                                        const existing = new Set(next[i].product_unit_ids || []);
+                                        if (e.target.checked) existing.add(u.id); else existing.delete(u.id);
+                                        const ids = Array.from(existing);
+                                        next[i] = { ...next[i], product_unit_ids: ids, quantity: String(ids.length), total_price: ids.length * (parseFloat(next[i].unit_price) || 0) };
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                  {u.weight} {u.weight_unit}
+                                </label>
+                              );
+                            })}
+                            {units.length === 0 && <span className="text-[10px] text-neutral-400">No available pieces</span>}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
