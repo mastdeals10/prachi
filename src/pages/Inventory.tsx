@@ -552,9 +552,15 @@ export default function Inventory() {
                         <button onClick={() => openEdit(p)} title="Edit" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-700 transition-colors">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => openStockModal(p)} title="Stock In/Out" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-primary-600 transition-colors">
-                          <ArrowUpDown className="w-3.5 h-3.5" />
-                        </button>
+                        {p.is_gemstone ? (
+                          <button onClick={() => openStockModal(p)} title="Add / Remove Pieces" className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
+                            <ArrowUpDown className="w-3 h-3" /> Pieces
+                          </button>
+                        ) : (
+                          <button onClick={() => openStockModal(p)} title="Stock In/Out" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-primary-600 transition-colors">
+                            <ArrowUpDown className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button onClick={() => openLedgerModal(p)} title="Movement Ledger" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-blue-600 transition-colors">
                           <History className="w-3.5 h-3.5" />
                         </button>
@@ -709,7 +715,7 @@ export default function Inventory() {
               <input type="number" value={form.selling_price} onChange={e => setForm(f => ({ ...f, selling_price: e.target.value }))} className="input" placeholder="0" />
             </div>
           </div>
-          {godowns.length > 0 && (
+          {godowns.length > 0 && !form.is_gemstone && (
             <div className="col-span-2">
               <label className="label">{editing ? 'Stock per Godown' : 'Opening Stock per Godown'}</label>
               <div className="grid grid-cols-2 gap-2">
@@ -735,6 +741,16 @@ export default function Inventory() {
               )}
             </div>
           )}
+          {form.is_gemstone && (
+            <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+              <p className="text-xs font-semibold text-amber-800 mb-0.5">How to add gemstone stock</p>
+              <p className="text-xs text-amber-700">
+                {editing
+                  ? 'To add pieces, close this dialog and click the \u2195 (Stock In/Out) button next to this product. Enter one weight per line under "Purchase (In)".'
+                  : 'After saving, click the \u2195 (Stock In/Out) button next to this product to add individual pieces with their weights.'}
+              </p>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="label">Billing Entity (for invoices)</label>
             <select value={form.company_id} onChange={e => setForm(f => ({ ...f, company_id: e.target.value }))} className="input text-xs">
@@ -753,7 +769,7 @@ export default function Inventory() {
       <Modal
         isOpen={showStockModal && !!selectedProduct}
         onClose={() => setShowStockModal(false)}
-        title={`Update Stock — ${selectedProduct?.name || ''}`}
+        title={selectedProduct?.is_gemstone ? `Piece Stock — ${selectedProduct?.name || ''}` : `Update Stock — ${selectedProduct?.name || ''}`}
         size="sm"
         footer={
           <>
@@ -778,7 +794,7 @@ export default function Inventory() {
                 { value: 'purchase', label: 'Purchase (In)' },
                 { value: 'sale', label: 'Sale (Out)' },
                 { value: 'return', label: 'Return (In)' },
-                { value: 'adjustment', label: 'Adjustment' },
+                ...(!selectedProduct?.is_gemstone ? [{ value: 'adjustment', label: 'Adjustment' }] : []),
               ].map(t => (
                 <button key={t.value} onClick={() => setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' }))}
                   className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors text-left ${stockForm.movement_label === t.value ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
@@ -789,8 +805,11 @@ export default function Inventory() {
           </div>
           {selectedProduct?.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) ? (
             <div>
-              <label className="label">Add Pieces (one weight per line)</label>
-              <textarea value={stockForm.piece_weights} onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))} className="input h-24 text-xs resize-none" placeholder={'2.3\n2.4\n1.2'} />
+              <label className="label">
+                Piece Weights — one per line ({selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams'})
+              </label>
+              <textarea value={stockForm.piece_weights} onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))} className="input h-28 text-xs resize-none font-mono" placeholder={'2.3\n4.1\n1.8'} />
+              <p className="text-[10px] text-neutral-400 mt-0.5">Each line = one piece. 3 lines = 3 pieces added to stock.</p>
             </div>
           ) : (
             <div>
@@ -943,7 +962,7 @@ export default function Inventory() {
               {/* Quick actions */}
               <div className="flex gap-2 pt-1">
                 <button onClick={() => { setViewProduct(null); openStockModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
-                  <ArrowUpDown className="w-3 h-3" /> Stock In/Out
+                  <ArrowUpDown className="w-3 h-3" /> {viewProduct.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'}
                 </button>
                 <button onClick={() => { setViewProduct(null); openLedgerModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
                   <History className="w-3 h-3" /> View Movements
