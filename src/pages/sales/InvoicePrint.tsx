@@ -167,22 +167,34 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
             </tr>
           </thead>
           <tbody>
-            {(b2bItems || []).map((item, idx) => (
-              <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
-                <td className="px-3 py-2.5 text-xs text-neutral-500 border-b border-neutral-100">{idx + 1}</td>
-                <td className="px-3 py-2.5 border-b border-neutral-100">
-                  <p className="text-sm font-medium text-neutral-900">{item.product_name}</p>
-                  {item.description && <p className="text-xs text-neutral-500">{item.description}</p>}
-                </td>
-                <td className="px-3 py-2.5 text-xs text-center text-neutral-600 border-b border-neutral-100">{item.unit}</td>
-                <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">{item.quantity}</td>
-                <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">{formatCurrency(item.unit_price)}</td>
-                {!isB2B && invoice.items?.some(i => i.discount_pct > 0) && (
-                  <td className="px-3 py-2.5 text-xs text-right text-neutral-500 border-b border-neutral-100">{item.discount_pct > 0 ? `${item.discount_pct}%` : '-'}</td>
-                )}
-                <td className="px-3 py-2.5 text-sm text-right font-medium text-neutral-900 border-b border-neutral-100">{formatCurrency(item.total_price)}</td>
-              </tr>
-            ))}
+            {(b2bItems || []).map((item, idx) => {
+              const gemW = (item as Record<string, any>).gemstone_weight as number | undefined;
+              const isGemLine = gemW != null && gemW > 0;
+              const wUnit = item.unit === 'carats' || (item as Record<string, any>).weight_unit === 'carats' ? 'ct' : 'g';
+              return (
+                <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
+                  <td className="px-3 py-2.5 text-xs text-neutral-500 border-b border-neutral-100">{idx + 1}</td>
+                  <td className="px-3 py-2.5 border-b border-neutral-100">
+                    <p className="text-sm font-medium text-neutral-900">{item.product_name}</p>
+                    {item.description && <p className="text-xs text-neutral-500">{item.description}</p>}
+                    {isGemLine && (
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{gemW} {wUnit} &times; {formatCurrency(item.unit_price)} = {formatCurrency(gemW * item.unit_price)}</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs text-center text-neutral-600 border-b border-neutral-100">{item.unit}</td>
+                  <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">
+                    {isGemLine ? `${gemW} ${wUnit}` : item.quantity}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">
+                    {formatCurrency(item.unit_price)}{isGemLine && <span className="text-neutral-400">/{wUnit}</span>}
+                  </td>
+                  {!isB2B && invoice.items?.some(i => i.discount_pct > 0) && (
+                    <td className="px-3 py-2.5 text-xs text-right text-neutral-500 border-b border-neutral-100">{item.discount_pct > 0 ? `${item.discount_pct}%` : '-'}</td>
+                  )}
+                  <td className="px-3 py-2.5 text-sm text-right font-medium text-neutral-900 border-b border-neutral-100">{formatCurrency(item.total_price)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

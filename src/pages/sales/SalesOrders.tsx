@@ -30,6 +30,7 @@ interface LineItem {
   total_price: number;
   godown_id: string;
   product_unit_ids?: string[];
+  gemstone_weight?: number;
 }
 
 interface SalesOrdersProps {
@@ -235,9 +236,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const handleProductSelect = useCallback(async (i: number, product: Product) => {
     setItems(prev => {
       const next = [...prev];
-      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1', product_unit_ids: [] };
-      const price = product.selling_price;
-      next[i].total_price = price;
+      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1', product_unit_ids: [], gemstone_weight: 0 };
+      next[i].total_price = product.is_gemstone ? 0 : (product.selling_price || 0);
       return next;
     });
 
@@ -262,7 +262,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       if (smartRate !== product.selling_price) {
         setItems(prev => {
           const next = [...prev];
-          next[i] = { ...next[i], unit_price: String(smartRate), total_price: smartRate };
+          next[i] = { ...next[i], unit_price: String(smartRate), total_price: product.is_gemstone ? 0 : smartRate };
           return next;
         });
       }
@@ -302,11 +302,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); next[i].product_unit_ids = []; }
+        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); next[i].product_unit_ids = []; next[i].gemstone_weight = 0; }
       }
-      const qty = parseFloat(next[i].quantity) || 0;
-      const price = parseFloat(next[i].unit_price) || 0;
-      next[i].total_price = qty * price;
+      const isGem = !!products.find(p => p.id === next[i].product_id)?.is_gemstone;
+      if (isGem) {
+        const gw = next[i].gemstone_weight || 0;
+        next[i].total_price = gw * (parseFloat(next[i].unit_price) || 0);
+      } else {
+        const qty = parseFloat(next[i].quantity) || 0;
+        next[i].total_price = qty * (parseFloat(next[i].unit_price) || 0);
+      }
       return next;
     });
 
@@ -337,9 +342,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           setItems(prev => {
             const next = [...prev];
             next[i] = { ...next[i], unit_price: String(smartRate) };
-            const qty = parseFloat(next[i].quantity) || 0;
-            const disc = parseFloat(next[i].discount_pct || '0') || 0;
-            next[i].total_price = qty * smartRate * (1 - disc / 100);
+            const isGem = !!products.find(p => p.id === next[i].product_id)?.is_gemstone;
+            if (isGem) {
+              next[i].total_price = (next[i].gemstone_weight || 0) * smartRate;
+            } else {
+              const qty = parseFloat(next[i].quantity) || 0;
+              next[i].total_price = qty * smartRate;
+            }
             return next;
           });
         }
@@ -461,6 +470,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           unit_price: parseFloat(i.unit_price) || 0,
           b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
           godown_id: i.godown_id || null,
+          gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
         })),
       });
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
@@ -1169,9 +1179,19 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                             <p className="text-[10px] text-neutral-400 mt-0.5 text-right">auto</p>
                           )}
                         </td>
-                        <td className="px-3 py-2 w-24"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
+                        <td className="px-3 py-2 w-24">
+                          <input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" />
+                          {!!products.find(p => p.id === item.product_id)?.is_gemstone && (
+                            <p className="text-[10px] text-neutral-400 mt-0.5 text-right">per {products.find(p => p.id === item.product_id)?.weight_unit === 'carats' ? 'ct' : 'g'}</p>
+                          )}
+                        </td>
                         <td className={`px-3 py-2 w-24 ${!form.is_b2b ? 'hidden' : ''}`}><input type="number" value={item.b2b_price} onChange={e => updateItem(i, 'b2b_price', e.target.value)} placeholder={item.unit_price} className="input text-xs text-right" /></td>
-                        <td className="px-3 py-2 w-24 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
+                        <td className="px-3 py-2 w-24 text-right text-sm font-medium">
+                          {formatCurrency(item.total_price)}
+                          {(item.gemstone_weight || 0) > 0 && (
+                            <p className="text-[10px] text-neutral-400 font-normal mt-0.5">{item.gemstone_weight}{products.find(p=>p.id===item.product_id)?.weight_unit==='carats'?'ct':'g'} &times; {formatCurrency(parseFloat(item.unit_price)||0)}</p>
+                          )}
+                        </td>
                         <td className="px-3 py-2 w-8"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
                       </tr>
                     );
@@ -1199,7 +1219,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                                         const existing = new Set(next[i].product_unit_ids || []);
                                         if (e.target.checked) existing.add(u.id); else existing.delete(u.id);
                                         const ids = Array.from(existing);
-                                        next[i] = { ...next[i], product_unit_ids: ids, quantity: String(ids.length), total_price: ids.length * (parseFloat(next[i].unit_price) || 0) };
+                                        const allUnits = lineUnits[i] || [];
+                                        const totalWeight = allUnits
+                                          .filter(pu => ids.includes(pu.id))
+                                          .reduce((s, pu) => s + (pu.weight || 0), 0);
+                                        const unitPrice = parseFloat(next[i].unit_price) || 0;
+                                        next[i] = { ...next[i], product_unit_ids: ids, quantity: String(ids.length), gemstone_weight: totalWeight, total_price: totalWeight * unitPrice };
                                         return next;
                                       });
                                     }}
