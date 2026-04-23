@@ -556,6 +556,15 @@ interface GodownStockProductRef {
   low_stock_alert: number;
   selling_price: number;
   purchase_price: number;
+  product_type?: string;
+}
+
+interface GodownStockVariantRef {
+  id: string;
+  name: string;
+  sku: string;
+  selling_price: number;
+  purchase_price: number;
 }
 
 interface GodownStockGodownRef {
@@ -569,12 +578,14 @@ export interface GodownStock {
   id: string;
   godown_id: string;
   product_id: string;
+  variant_id?: string | null;
   quantity: number;
   updated_at: string;
   godown?: GodownStockGodownRef;
   godowns?: GodownStockGodownRef;
   product?: GodownStockProductRef;
   products?: GodownStockProductRef;
+  product_variants?: GodownStockVariantRef | null;
 }
 
 export interface DispatchEntry {

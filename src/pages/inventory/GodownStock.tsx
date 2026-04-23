@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
+import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import type { Godown, GodownStock, StockMovement } from '../../types';
+
+interface VariantStockRow {
+  variant_id: string;
+  variant_name: string;
+  variant_sku: string;
+  selling_price: number;
+  purchase_price: number;
+  total_quantity: number;
+  godown_quantities: Record<string, number>;
+}
 
 interface ProductWithStock {
   product_id: string;
@@ -12,8 +22,10 @@ interface ProductWithStock {
   low_stock_alert: number;
   selling_price: number;
   purchase_price: number;
+  product_type: string;
   total_quantity: number;
   godown_quantities: Record<string, number>;
+  variants?: VariantStockRow[];
 }
 
 interface MovementWithProduct extends StockMovement {
@@ -27,6 +39,7 @@ export default function GodownStockPage() {
   const [allStock, setAllStock] = useState<GodownStock[]>([]);
   const [loading, setLoading] = useState(true);
   const [stockSearch, setStockSearch] = useState('');
+  const [expandedVariantProducts, setExpandedVariantProducts] = useState<Set<string>>(new Set());
   const [drillProduct, setDrillProduct] = useState<ProductWithStock | null>(null);
   const [movements, setMovements] = useState<MovementWithProduct[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -43,10 +56,10 @@ export default function GodownStockPage() {
     const [godownsRes, stockRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock')
-        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price)')
+        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
         .order('quantity', { ascending: false })
-        .limit(500),
+        .limit(1000),
     ]);
     setGodowns(godownsRes.data || []);
     setAllStock((stockRes.data || []) as GodownStock[]);
@@ -56,7 +69,7 @@ export default function GodownStockPage() {
   const loadGodownStock = async (godownId: string) => {
     const { data } = await supabase
       .from('godown_stock')
-      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price)')
+      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
       .eq('godown_id', godownId)
       .gte('quantity', 0)
       .order('quantity', { ascending: false });
@@ -64,6 +77,7 @@ export default function GodownStockPage() {
   };
 
   const openDrillDown = async (product: ProductWithStock) => {
+    if (product.product_type === 'variant') return;
     setDrillProduct(product);
     setMovementsLoading(true);
     const { data } = await supabase
@@ -76,13 +90,25 @@ export default function GodownStockPage() {
     setMovementsLoading(false);
   };
 
-  const overallProducts = (): ProductWithStock[] => {
-    const map: Record<string, ProductWithStock> = {};
-    for (const s of allStock) {
-      const p = s.products;
+  const toggleVariantExpand = (productId: string) => {
+    setExpandedVariantProducts(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  };
+
+  const buildOverallProducts = (stock: GodownStock[]): ProductWithStock[] => {
+    const productMap: Record<string, ProductWithStock> = {};
+
+    for (const s of stock) {
+      const p = s.products as any;
+      const v = (s as any).product_variants as any;
       if (!p) continue;
-      if (!map[s.product_id]) {
-        map[s.product_id] = {
+
+      if (!productMap[s.product_id]) {
+        productMap[s.product_id] = {
           product_id: s.product_id,
           product_name: p.name,
           sku: p.sku,
@@ -90,31 +116,65 @@ export default function GodownStockPage() {
           low_stock_alert: p.low_stock_alert,
           selling_price: p.selling_price,
           purchase_price: p.purchase_price,
+          product_type: p.product_type || 'simple',
           total_quantity: 0,
           godown_quantities: {},
+          variants: [],
         };
       }
-      map[s.product_id].total_quantity += s.quantity;
-      map[s.product_id].godown_quantities[s.godown_id] = s.quantity;
+
+      const row = productMap[s.product_id];
+
+      if (v && s.variant_id) {
+        // Variant stock row
+        let variantRow = row.variants!.find(vr => vr.variant_id === s.variant_id);
+        if (!variantRow) {
+          variantRow = {
+            variant_id: s.variant_id,
+            variant_name: v.name,
+            variant_sku: v.sku,
+            selling_price: v.selling_price,
+            purchase_price: v.purchase_price,
+            total_quantity: 0,
+            godown_quantities: {},
+          };
+          row.variants!.push(variantRow);
+        }
+        variantRow.total_quantity += s.quantity;
+        variantRow.godown_quantities[s.godown_id] = (variantRow.godown_quantities[s.godown_id] || 0) + s.quantity;
+        row.total_quantity += s.quantity;
+        row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
+      } else {
+        // Simple/weight/gemstone stock row
+        row.total_quantity += s.quantity;
+        row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
+      }
     }
-    return Object.values(map);
+
+    return Object.values(productMap);
   };
 
-  const currentGodownProducts = (): ProductWithStock[] => {
-    return godownStock.map(s => ({
-      product_id: s.product_id,
-      product_name: s.products?.name || '',
-      sku: s.products?.sku || '',
-      unit: s.products?.unit || '',
-      low_stock_alert: s.products?.low_stock_alert || 0,
-      selling_price: s.products?.selling_price || 0,
-      purchase_price: s.products?.purchase_price || 0,
-      total_quantity: s.quantity,
-      godown_quantities: { [s.godown_id]: s.quantity },
-    }));
+  const buildGodownProducts = (stock: GodownStock[]): ProductWithStock[] => {
+    return stock.map(s => {
+      const p = s.products as any;
+      return {
+        product_id: s.product_id,
+        product_name: p?.name || '',
+        sku: p?.sku || '',
+        unit: p?.unit || '',
+        low_stock_alert: p?.low_stock_alert || 0,
+        selling_price: p?.selling_price || 0,
+        purchase_price: p?.purchase_price || 0,
+        product_type: p?.product_type || 'simple',
+        total_quantity: s.quantity,
+        godown_quantities: { [s.godown_id]: s.quantity },
+      };
+    });
   };
 
-  const displayProducts = activeTab === 'overall' ? overallProducts() : currentGodownProducts();
+  const displayProducts = activeTab === 'overall'
+    ? buildOverallProducts(allStock)
+    : buildGodownProducts(godownStock);
 
   const filtered = displayProducts.filter(p =>
     !stockSearch ||
@@ -122,7 +182,12 @@ export default function GodownStockPage() {
     p.sku?.toLowerCase().includes(stockSearch.toLowerCase())
   );
 
-  const totalValue = displayProducts.reduce((s, p) => s + (p.total_quantity * p.selling_price), 0);
+  const totalValue = displayProducts.reduce((s, p) => {
+    if (p.product_type === 'variant' && p.variants?.length) {
+      return s + p.variants.reduce((vs, v) => vs + v.total_quantity * v.selling_price, 0);
+    }
+    return s + p.total_quantity * p.selling_price;
+  }, 0);
   const lowCount = displayProducts.filter(p => p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert).length;
 
   const movementIcon = (type: string) => {
@@ -256,60 +321,125 @@ export default function GodownStockPage() {
                 </thead>
                 <tbody>
                   {filtered.map(p => {
+                    const isVariant = p.product_type === 'variant' && (p.variants?.length || 0) > 0;
+                    const isExpanded = expandedVariantProducts.has(p.product_id);
                     const isLow = p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert;
                     const isOut = p.total_quantity === 0;
                     const stockPct = p.low_stock_alert > 0 ? Math.min(100, (p.total_quantity / (p.low_stock_alert * 3)) * 100) : 80;
+                    const rowValue = isVariant
+                      ? (p.variants || []).reduce((s, v) => s + v.total_quantity * v.selling_price, 0)
+                      : p.total_quantity * p.selling_price;
 
                     return (
-                      <tr
-                        key={p.product_id}
-                        className={`border-b border-neutral-50 hover:bg-primary-50/40 transition-colors cursor-pointer ${isLow ? 'bg-warning-50/30' : ''}`}
-                        onClick={() => openDrillDown(p)}
-                      >
-                        <td className="table-cell">
-                          <div className="flex items-center gap-2">
-                            {isLow && <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0" />}
-                            <span className="font-medium text-neutral-800 hover:text-primary-700">{p.product_name}</span>
-                          </div>
-                        </td>
-                        <td className="table-cell text-xs text-neutral-500 font-mono">{p.sku || '—'}</td>
-                        <td className="table-cell text-right">
-                          <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
-                            {p.total_quantity}
-                          </span>
-                          {p.low_stock_alert > 0 && (
-                            <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
-                          )}
-                        </td>
-                        <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
-                        {activeTab === 'overall' && godowns.map(g => (
-                          <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
-                            <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
-                              {p.godown_quantities[g.id] || 0}
-                            </span>
+                      <>
+                        <tr
+                          key={p.product_id}
+                          className={`border-b border-neutral-50 transition-colors ${
+                            isVariant
+                              ? 'cursor-pointer hover:bg-blue-50/40'
+                              : 'cursor-pointer hover:bg-primary-50/40'
+                          } ${isLow ? 'bg-warning-50/30' : ''}`}
+                          onClick={() => isVariant ? toggleVariantExpand(p.product_id) : openDrillDown(p)}
+                        >
+                          <td className="table-cell">
+                            <div className="flex items-center gap-2">
+                              {isVariant ? (
+                                isExpanded
+                                  ? <ChevronDown className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                  : <ChevronRight className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              ) : (
+                                isLow && <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0" />
+                              )}
+                              <span className="font-medium text-neutral-800 hover:text-primary-700">
+                                {p.product_name}
+                              </span>
+                              {isVariant && (
+                                <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                  {p.variants!.length} variants
+                                </span>
+                              )}
+                            </div>
                           </td>
-                        ))}
-                        <td className="table-cell text-right text-xs font-medium text-neutral-600">
-                          {formatCurrency(p.total_quantity * p.selling_price)}
-                        </td>
-                        <td className="table-cell">
-                          {isOut ? (
-                            <span className="badge bg-error-50 text-error-700 border border-error-100">Out of Stock</span>
-                          ) : isLow ? (
-                            <span className="badge bg-warning-50 text-warning-700 border border-warning-100">Low Stock</span>
-                          ) : (
-                            <span className="badge bg-success-50 text-success-700">In Stock</span>
-                          )}
-                        </td>
-                        <td className="table-cell w-20">
-                          <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${isOut ? 'bg-error-500' : isLow ? 'bg-warning-500' : 'bg-success-500'}`}
-                              style={{ width: `${isOut ? 0 : stockPct}%` }}
-                            />
-                          </div>
-                        </td>
-                      </tr>
+                          <td className="table-cell text-xs text-neutral-500 font-mono">{p.sku || '—'}</td>
+                          <td className="table-cell text-right">
+                            <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                              {p.total_quantity}
+                            </span>
+                            {p.low_stock_alert > 0 && (
+                              <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                            )}
+                          </td>
+                          <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
+                          {activeTab === 'overall' && godowns.map(g => (
+                            <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
+                              <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
+                                {p.godown_quantities[g.id] || 0}
+                              </span>
+                            </td>
+                          ))}
+                          <td className="table-cell text-right text-xs font-medium text-neutral-600">
+                            {formatCurrency(rowValue)}
+                          </td>
+                          <td className="table-cell">
+                            {isOut ? (
+                              <span className="badge bg-error-50 text-error-700 border border-error-100">Out of Stock</span>
+                            ) : isLow ? (
+                              <span className="badge bg-warning-50 text-warning-700 border border-warning-100">Low Stock</span>
+                            ) : (
+                              <span className="badge bg-success-50 text-success-700">In Stock</span>
+                            )}
+                          </td>
+                          <td className="table-cell w-20">
+                            <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${isOut ? 'bg-error-500' : isLow ? 'bg-warning-500' : 'bg-success-500'}`}
+                                style={{ width: `${isOut ? 0 : stockPct}%` }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Variant sub-rows */}
+                        {isVariant && isExpanded && (p.variants || []).map(v => {
+                          const vIsOut = v.total_quantity === 0;
+                          const vValue = v.total_quantity * v.selling_price;
+                          return (
+                            <tr key={`${p.product_id}-${v.variant_id}`} className="border-b border-neutral-50 bg-blue-50/20 hover:bg-blue-50/40 transition-colors">
+                              <td className="table-cell">
+                                <div className="flex items-center gap-2 pl-6">
+                                  <div className="w-px h-4 bg-blue-200 shrink-0" />
+                                  <span className="text-sm text-neutral-700 font-medium">{v.variant_name}</span>
+                                </div>
+                              </td>
+                              <td className="table-cell text-xs text-neutral-400 font-mono pl-8">{v.variant_sku || '—'}</td>
+                              <td className="table-cell text-right">
+                                <span className={`font-bold text-sm ${vIsOut ? 'text-error-600' : 'text-neutral-800'}`}>
+                                  {v.total_quantity}
+                                </span>
+                              </td>
+                              <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
+                              {activeTab === 'overall' && godowns.map(g => (
+                                <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
+                                  <span className={v.godown_quantities[g.id] ? 'font-medium text-neutral-700' : 'text-neutral-300'}>
+                                    {v.godown_quantities[g.id] || 0}
+                                  </span>
+                                </td>
+                              ))}
+                              <td className="table-cell text-right text-xs font-medium text-neutral-600">
+                                {formatCurrency(vValue)}
+                              </td>
+                              <td className="table-cell">
+                                {vIsOut ? (
+                                  <span className="badge bg-error-50 text-error-700 border border-error-100">Out of Stock</span>
+                                ) : (
+                                  <span className="badge bg-success-50 text-success-700">In Stock</span>
+                                )}
+                              </td>
+                              <td className="table-cell w-20" />
+                            </tr>
+                          );
+                        })}
+                      </>
                     );
                   })}
                 </tbody>
